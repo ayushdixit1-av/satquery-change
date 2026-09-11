@@ -214,15 +214,19 @@ function setEngineReady() {
   el.engine.innerHTML = '<span class="dot"></span> engine ready';
 }
 
+function updateRunState() {
+  el.run.disabled = !(state.img1 && state.img2);
+}
+
 function wireDrop(dz, input, box, setter) {
   input.addEventListener('change', () => {
-    if (input.files[0]) loadFile(input.files[0]).then((img) => { setter(img); paintBox(box, img); });
+    if (input.files[0]) loadFile(input.files[0]).then((img) => { setter(img); paintBox(box, img); updateRunState(); });
   });
   dz.addEventListener('dragover', (e) => { e.preventDefault(); dz.classList.add('hover'); });
   dz.addEventListener('dragleave', () => dz.classList.remove('hover'));
   dz.addEventListener('drop', (e) => {
     e.preventDefault(); dz.classList.remove('hover');
-    if (e.dataTransfer.files[0]) loadFile(e.dataTransfer.files[0]).then((img) => { setter(img); paintBox(box, img); });
+    if (e.dataTransfer.files[0]) loadFile(e.dataTransfer.files[0]).then((img) => { setter(img); paintBox(box, img); updateRunState(); });
   });
 }
 
