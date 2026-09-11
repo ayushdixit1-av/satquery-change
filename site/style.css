@@ -17,10 +17,37 @@ body {
   background: radial-gradient(1200px 700px at 20% -10%, #15203a 0%, var(--bg) 55%), var(--bg);
   color: var(--text);
   min-height: 100vh;
+  overflow-x: hidden;
 }
-#stars { position: fixed; inset:0; z-index:-1; pointer-events:none; opacity:.5; }
+#stars {
+  position: fixed; inset: 0; z-index: 0; pointer-events: none;
+}
+.nebula { position: fixed; border-radius: 50%; z-index: 0; pointer-events: none; filter: blur(80px); opacity:.5; }
+.n1 { width:60vmax; height:60vmax; left:-22vmax; top:-16vmax;
+  background: radial-gradient(circle, rgba(79,140,255,.22), transparent 60%);
+  animation: drift1 34s ease-in-out infinite alternate; }
+.n2 { width:52vmax; height:52vmax; right:-20vmax; bottom:-18vmax;
+  background: radial-gradient(circle, rgba(138,99,255,.18), transparent 60%);
+  animation: drift2 42s ease-in-out infinite alternate; }
+@keyframes drift1 { to { transform: translate(9vmax, 7vmax) scale(1.12); } }
+@keyframes drift2 { to { transform: translate(-8vmax, -6vmax) scale(1.08); } }
+
+#stage {
+  position: fixed; z-index: 2; top:0; left:0; pointer-events: none;
+  will-change: transform;
+}
+#sat3d {
+  filter: drop-shadow(0 0 26px rgba(79,140,255,.55)) drop-shadow(0 0 60px rgba(138,99,255,.35));
+  transform-origin: center center;
+}
+#sat3d .glow { animation: thr 1.6s ease-in-out infinite; }
+@keyframes thr {
+  0%,100% { stroke: rgba(57,240,168,.85); stroke-width:2.5; }
+  50% { stroke: rgba(57,240,168,.25); stroke-width:5; }
+}
 
 header {
+  position: relative; z-index: 3;
   display:flex; align-items:center; justify-content:space-between;
   padding:22px 34px; max-width:1180px; margin:0 auto;
 }
@@ -34,14 +61,25 @@ header {
 }
 .gh:hover { color:#fff; border-color:var(--accent); }
 
-main { max-width:1180px; margin:0 auto; padding:0 28px 40px; }
+main { position: relative; z-index: 3; max-width:1180px; margin:0 auto; padding:0 28px 40px; }
 .intro h2 { font-size:26px; margin:10px 0 6px; }
 .intro p { color:var(--muted); max-width:720px; line-height:1.55; font-size:14px; }
 
 .panel {
-  background:linear-gradient(180deg, var(--panel), var(--bg2));
-  border:1px solid var(--line); border-radius:16px; padding:20px; margin-top:22px;
-  box-shadow:0 10px 40px rgba(0,0,0,.35);
+  position: relative;
+  background: linear-gradient(180deg, rgba(19,24,36,.72), rgba(16,20,28,.78));
+  border: 1px solid rgba(122,152,209,.18);
+  border-radius: 18px; padding: 20px; margin-top: 22px;
+  box-shadow: 0 10px 40px rgba(0,0,0,.35), inset 0 1px 0 rgba(255,255,255,.04);
+  backdrop-filter: blur(14px) saturate(1.15);
+  -webkit-backdrop-filter: blur(14px) saturate(1.15);
+}
+.panel::before {
+  content:""; position:absolute; inset:-1px; border-radius:inherit; padding:1px; pointer-events:none;
+  background: linear-gradient(140deg, rgba(143,180,255,.35), transparent 35%, transparent 65%, rgba(138,99,255,.3));
+  -webkit-mask: linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0);
+  -webkit-mask-composite: xor; mask-composite: exclude;
+  opacity:.5;
 }
 
 #dropzone { display:flex; gap:16px; align-items:center; }
@@ -125,7 +163,7 @@ input[type=checkbox] { accent-color:var(--accent); width:18px; height:18px; }
 .lg i { width:13px; height:13px; border-radius:3px; display:inline-block; }
 .lg b { color:var(--text); font-weight:600; }
 
-footer { text-align:center; color:#59637a; font-size:12.5px; padding:28px; }
+footer { position: relative; z-index: 3; text-align:center; color:#59637a; font-size:12.5px; padding:28px; }
 
 @media (max-width:900px) {
   .grid3 { grid-template-columns:1fr; }

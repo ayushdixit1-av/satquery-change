@@ -9,6 +9,56 @@
 </head>
 <body>
 <canvas id="stars"></canvas>
+<div class="nebula n1"></div>
+<div class="nebula n2"></div>
+
+<div id="stage" aria-hidden="true">
+  <svg id="sat3d" viewBox="0 0 260 220" width="260" height="220">
+    <!-- solar panel left -->
+    <g class="wing left">
+      <rect x="8" y="78" width="86" height="64" rx="4" fill="url(#panelGrad)" stroke="#3d6bb5" stroke-width="1.5"/>
+      <line x1="30" y1="78" x2="30" y2="142" stroke="#2c4f8f" stroke-width="1" opacity=".6"/>
+      <line x1="52" y1="78" x2="52" y2="142" stroke="#2c4f8f" stroke-width="1" opacity=".6"/>
+      <line x1="74" y1="78" x2="74" y2="142" stroke="#2c4f8f" stroke-width="1" opacity=".6"/>
+      <line x1="8" y1="99" x2="94" y2="99" stroke="#2c4f8f" stroke-width="1" opacity=".6"/>
+      <line x1="8" y1="121" x2="94" y2="121" stroke="#2c4f8f" stroke-width="1" opacity=".6"/>
+    </g>
+    <!-- solar panel right -->
+    <g class="wing right">
+      <rect x="166" y="78" width="86" height="64" rx="4" fill="url(#panelGrad)" stroke="#3d6bb5" stroke-width="1.5"/>
+      <line x1="188" y1="78" x2="188" y2="142" stroke="#2c4f8f" stroke-width="1" opacity=".6"/>
+      <line x1="210" y1="78" x2="210" y2="142" stroke="#2c4f8f" stroke-width="1" opacity=".6"/>
+      <line x1="232" y1="78" x2="232" y2="142" stroke="#2c4f8f" stroke-width="1" opacity=".6"/>
+      <line x1="166" y1="99" x2="252" y2="99" stroke="#2c4f8f" stroke-width="1" opacity=".6"/>
+      <line x1="166" y1="121" x2="252" y2="121" stroke="#2c4f8f" stroke-width="1" opacity=".6"/>
+    </g>
+    <!-- body -->
+    <rect x="94" y="64" width="72" height="92" rx="10" fill="url(#bodyGrad)" stroke="#8fb4ff" stroke-width="1.5"/>
+    <rect x="104" y="88" width="52" height="44" rx="6" fill="#1a2740"/>
+    <rect x="112" y="96" width="24" height="20" rx="3" fill="#39f0a8" opacity=".9"/>
+    <!-- dish -->
+    <circle cx="130" cy="40" r="16" fill="none" stroke="url(#dishGrad)" stroke-width="3.5"/>
+    <circle cx="130" cy="40" r="4" fill="#8fb4ff"/>
+    <line x1="130" y1="56" x2="130" y2="64" stroke="#8fb4ff" stroke-width="2"/>
+    <!-- antenna -->
+    <line x1="154" y1="22" x2="160" y2="44" stroke="#8fb4ff" stroke-width="2"/>
+    <rect x="150" y="18" width="8" height="4" rx="2" fill="#8fb4ff"/>
+    <!-- thruster glow -->
+    <circle class="glow" cx="130" cy="168" r="7" fill="none"/>
+    <defs>
+      <linearGradient id="panelGrad" x1="0" y1="0" x2="1" y2="1">
+        <stop offset="0" stop-color="#2a4f96"/><stop offset=".5" stop-color="#3a6bd0"/><stop offset="1" stop-color="#1d3a78"/>
+      </linearGradient>
+      <linearGradient id="bodyGrad" x1="0" y1="0" x2="0" y2="1">
+        <stop offset="0" stop-color="#cfd9ef"/><stop offset=".5" stop-color="#7e95c4"/><stop offset="1" stop-color="#41557f"/>
+      </linearGradient>
+      <radialGradient id="dishGrad">
+        <stop offset="0" stop-color="#cfe0ff"/><stop offset="1" stop-color="#4f8cff"/>
+      </radialGradient>
+    </defs>
+  </svg>
+</div>
+
 <header>
   <div class="logo"><span class="sat">🛰️</span><div><h1>SatQuery</h1><p>satellite change detection · runs 100% in your browser</p></div></div>
   <a class="gh" href="https://github.com/" target="_blank" rel="noopener">GitHub ↗</a>
@@ -91,5 +141,6 @@
 
 <script src="https://cdn.jsdelivr.net/npm/onnxruntime-web@1.20.1/dist/ort.min.js"></script>
 <script src="app.js"></script>
+<script src="bg.js"></script>
 </body>
 </html>
