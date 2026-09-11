@@ -28,6 +28,7 @@
 
   <section class="runbar">
     <button id="run" disabled>Run change detection</button>
+    <button id="sceneBtn" class="ghost" disabled>Analyze scene (single image)</button>
     <div class="engine" id="engine">
       <span class="dot"></span> engine ready
     </div>
@@ -61,6 +62,19 @@
         <a class="btn" id="dlProb" download="change_probability.png">⬇ prob</a>
       </div>
     </div>
+  </section>
+
+  <section class="panel results" id="scene" hidden>
+    <h3 class="ptitle">Scene analysis<span id="sceneWhich"></span></h3>
+    <div class="grid3">
+      <figure><figcaption><b>Analyzed image</b></figcaption><div class="figsplit"><img id="scIn"><div></div></div></figure>
+      <figure><figcaption><b>Land cover map</b></figcaption><canvas id="scCv" width="256" height="256"></canvas></figure>
+      <figure>
+        <figcaption><b>What's in this image</b><span class="chip" id="scDom">–</span></figcaption>
+        <div class="expl" id="scExplain">–</div>
+      </figure>
+    </div>
+    <div class="legend" id="scLegend"></div>
   </section>
 
   <section class="panel how">

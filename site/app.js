@@ -150,6 +150,120 @@ function estimateAlignment(a, b, sh) {
   return best;
 }
 
+/* ================= Scene analysis (RGB heuristic) ================= */
+
+const SCENE_SIZE = 256;
+const CLASSES = [
+  { name: 'Shadow / unclear', color: [28, 29, 34] },   // 0
+  { name: 'Water',            color: [31, 119, 180] },  // 1
+  { name: 'Vegetation',       color: [74, 176, 91] },   // 2
+  { name: 'Bare land / soil', color: [205, 170, 92] },  // 3
+  { name: 'Built-up / urban', color: [177, 92, 150] },  // 4
+  { name: 'Cloud / snow',     color: [232, 232, 238] }, // 5
+];
+
+function percentile(sorted, p) {
+  const idx = Math.min(sorted.length - 1, Math.floor(sorted.length * p));
+  return sorted[idx];
+}
+
+/* Classify a downsampled RGBA image into land-cover classes.
+   imgData: {width,height,data}. Returns {ids: Uint8Array (SCENE_SIZE^2), counts: Int32Array(6)} */
+function classifyScene(imgData) {
+  const n = SCENE_SIZE * SCENE_SIZE;
+  const ids = new Uint8Array(n);
+  const counts = new Int32Array(CLASSES.length);
+  const { width, height, data } = imgData;
+  const dx = width / SCENE_SIZE, dy = height / SCENE_SIZE;
+  const bright = new Float32Array(n);
+  for (let y = 0; y < SCENE_SIZE; y++) {
+    const sy0 = Math.min(height - 1, Math.round(y * dy));
+    for (let x = 0; x < SCENE_SIZE; x++) {
+      const sx0 = Math.min(width - 1, Math.round(x * dx));
+      const s = (sy0 * width + sx0) * 4;
+      bright[y * SCENE_SIZE + x] = (data[s] + data[s + 1] + data[s + 2]) / (3 * 255);
+    }
+  }
+  const sorted = Array.from(bright).sort((a, b) => a - b);
+  const lq = percentile(sorted, 0.2);
+  const uq = percentile(sorted, 0.8);
+  const thrDark = Math.max(0.04, lq * 0.7);
+  const thrBright = Math.min(0.88, Math.max(0.5, uq * 1.05));
+
+  const decide = (r, g, b, v) => {
+    const mx = Math.max(r, g, b), mn = Math.min(r, g, b);
+    const sat = mx > 1e-6 ? (mx - mn) / mx : 0;
+    const grn = g - r;             // greenness
+    const blu = b - r;             // blue dominance
+    if (v < thrDark) return 0;                        // shadow
+    if (v > thrBright && sat < 0.16) return 5;        // bright white -> cloud/snow
+    if (grn > 0.045 && g > b && sat > 0.12) return 2; // vegetation
+    if (blu > 0.03 && b > g && v < 0.62 && sat > 0.10) return 1; // blue water
+    if (sat > 0.18) {
+      if (r >= g && g > b && v > 0.18 && v < 0.78) return 3; // warm bare soil
+    }
+    if (sat < 0.18 && v > 0.30 && v < thrBright) return 4;  // gray built-up
+    return 0;
+  };
+
+  for (let y = 0; y < SCENE_SIZE; y++) {
+    const sy0 = Math.min(height - 1, Math.round(y * dy));
+    for (let x = 0; x < SCENE_SIZE; x++) {
+      const sx0 = Math.min(width - 1, Math.round(x * dx));
+      const s = (sy0 * width + sx0) * 4;
+      const r = data[s] / 255, g = data[s + 1] / 255, b = data[s + 2] / 255;
+      const v = (r + g + b) / 3;
+      const c = decide(r, g, b, v);
+      ids[y * SCENE_SIZE + x] = c;
+      counts[c]++;
+    }
+  }
+  return { ids, counts };
+}
+
+function pct(arr, i) { return 100 * arr[i] / SCENE_SIZE / SCENE_SIZE; }
+
+/* Approximate location of a class as a phrase using its centroid. */
+function whereIsClass(ids, cls) {
+  let sx = 0, sy = 0, c = 0;
+  for (let y = 0; y < SCENE_SIZE; y++) {
+    for (let x = 0; x < SCENE_SIZE; x++) {
+      if (ids[y * SCENE_SIZE + x] === cls) { sx += x; sy += y; c++; }
+    }
+  }
+  if (c === 0) return '';
+  const fy = sy / c / (SCENE_SIZE - 1), fx = sx / c / (SCENE_SIZE - 1);
+  const yt = fy < 0.36 ? 'top' : fy > 0.64 ? 'bottom' : 'middle';
+  const xt = fx < 0.36 ? 'left' : fx > 0.64 ? 'right' : 'center';
+  return `${yt}-${xt}`;
+}
+
+/* Build a natural-language explanation from classification results. */
+function describeScene(counts, ids) {
+  const parts = [];
+  for (let i = 0; i < CLASSES.length; i++) parts.push({ id: i, name: CLASSES[i].name, p: pct(counts, i) });
+  parts.sort((a, b) => b.p - a.p);
+  const top = parts[0];
+  const notable = parts.filter((x) => x.p >= 5);
+  let lead = `Dominant land cover: ${top.name} (~${top.p.toFixed(0)}% of the scene).`;
+  const rest = notable.filter((x) => x.id !== top.id);
+  if (rest.length) {
+    lead += ` Alongside it: ${rest.map((x) => `${x.name} (~${x.p.toFixed(0)}%)`).join(', ')}.`;
+  }
+  const water = parts.find((x) => x.id === 1);
+  let tail = '';
+  if (water && water.p >= 8) {
+    const loc = whereIsClass(ids, 1);
+    tail = ` Water covers ~${water.p.toFixed(0)}%${loc ? `, concentrated in the ${loc}` : ''} — looks like a lake, sea, river or reservoir.`;
+  }
+  const shadow = parts.find((x) => x.id === 0);
+  if (shadow && shadow.p >= 25) {
+    tail += (tail ? ' ' : '') + ` Note: ~${shadow.p.toFixed(0)}% is shadow/unclear — a dark or low-contrast scene makes detection partial.`;
+  }
+  return (lead + tail).trim().replace(/\s+/g, ' ');
+}
+function ids2cls() { return []; }
+
 /* ============================ DOM glue ============================ */
 
 const $ = (s) => document.querySelector(s);
@@ -164,6 +278,8 @@ const el = {
   probMeta: $('#probMeta'), changedPct: $('#changedPct'),
   thr: $('#thr'), thrOut: $('#thrOut'), otsuOut: $('#otsuOut'), timeOut: $('#timeOut'),
   clean: $('#clean'), dlMask: $('#dlMask'), dlProb: $('#dlProb'),
+  sceneBtn: $('#sceneBtn'), scene: $('#scene'), scIn: $('#scIn'), scCv: $('#scCv'),
+  scExplain: $('#scExplain'), scDom: $('#scDom'), scLegend: $('#scLegend'), scWhich: $('#sceneWhich'),
 };
 
 const state = { img1: null, img2: null, probs: null, mask: null, otsu: 0.5 };
@@ -216,6 +332,7 @@ function setEngineReady() {
 
 function updateRunState() {
   el.run.disabled = !(state.img1 && state.img2);
+  el.sceneBtn.disabled = !(state.img1 || state.img2);
 }
 
 function wireDrop(dz, input, box, setter) {
@@ -348,6 +465,48 @@ function saveCanvas(cv, name) {
   a.click();
 }
 
+const SCENE_MAP_COLORS = CLASSES.map((c) => `rgb(${c.color[0]},${c.color[1]},${c.color[2]})`);
+
+function drawSceneMap({ ctx, ids, explainEl }) {
+  const id = ctx.createImageData(SCENE_SIZE, SCENE_SIZE);
+  for (let i = 0; i < ids.length; i++) {
+    const col = CLASSES[ids[i]].color;
+    id.data[i * 4] = col[0]; id.data[i * 4 + 1] = col[1]; id.data[i * 4 + 2] = col[2]; id.data[i * 4 + 3] = 255;
+  }
+  ctx.putImageData(id, 0, 0);
+}
+
+function runScene() {
+  const img = state.img1 || state.img2;
+  if (!img) return;
+  const which = state.img1 && !state.img2 ? ' (T1 · before)' : state.img2 && !state.img1 ? ' (T2 · after)' : ' (T1 · before)';
+  el.scWhich.textContent = 'using image' + which;
+  setStatus('Analyzing scene…');
+  try {
+    const t0 = performance.now();
+    const d = imgToData(img);
+    const { ids, counts } = classifyScene(d);
+    const elapsed = ((performance.now() - t0) / 1000).toFixed(2);
+
+    drawSceneMap({ ctx: el.scCv.getContext('2d'), ids });
+    const text = describeScene(counts, ids);
+    el.scExplain.textContent = text;
+    const sorted = [];
+    for (let i = 0; i < CLASSES.length; i++) sorted.push({ i, p: pct(counts, i) });
+    sorted.sort((a, b) => b.p - a.p);
+    el.scDom.textContent = `${CLASSES[sorted[0].i].name} ${sorted[0].p.toFixed(0)}%`;
+    el.scLegend.innerHTML = sorted
+      .filter((x) => x.p >= 1)
+      .map((x) => `<span class="lg"><i style="background:${SCENE_MAP_COLORS[x.i]}"></i>${CLASSES[x.i].name}<b>${x.p.toFixed(1)}%</b></span>`)
+      .join('');
+    el.scIn.src = img.src;
+    el.scene.hidden = false;
+    setStatus('Scene analyzed in ' + elapsed + 's.');
+  } catch (e) {
+    setStatus('Scene analysis failed: ' + e.message, true);
+  }
+}
+
 /* ---------- wiring ---------- */
 wireDrop(el.dz1, el.f1, el.bx1, (img) => (state.img1 = img));
 wireDrop(el.dz2, el.f2, el.bx2, (img) => (state.img2 = img));
@@ -367,6 +526,12 @@ el.thr.addEventListener('input', () => {
 el.clean.addEventListener('change', () => {
   if (state.probs) drawMask({ maskCv: el.maskCv, data: state.probs, out: el.thr });
 });
+
+el.sceneBtn.addEventListener('click', () => {
+  setStatus('');
+  runScene();
+});
+updateRunState();
 
 // checkerboard indicator showing engine warms up
 setEngineReady();
