@@ -219,6 +219,7 @@ function updateRunState() {
 }
 
 function wireDrop(dz, input, box, setter) {
+  box.addEventListener('click', () => input.click());
   input.addEventListener('change', () => {
     if (input.files[0]) loadFile(input.files[0]).then((img) => { setter(img); paintBox(box, img); updateRunState(); });
   });
