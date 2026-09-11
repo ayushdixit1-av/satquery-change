@@ -1,0 +1,81 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>SatQuery · Satellite Change Detection</title>
+<link rel="stylesheet" href="style.css">
+<link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>🛰️</text></svg>">
+</head>
+<body>
+<canvas id="stars"></canvas>
+<header>
+  <div class="logo"><span class="sat">🛰️</span><div><h1>SatQuery</h1><p>satellite change detection · runs 100% in your browser</p></div></div>
+  <a class="gh" href="https://github.com/" target="_blank" rel="noopener">GitHub ↗</a>
+</header>
+
+<main>
+  <section class="intro">
+    <h2>What changed between these two views?</h2>
+    <p>Upload an image pair of the same area from two dates. A change-detection model (~6M params) is loaded into your browser as WebAssembly and infers a change map locally — nothing is uploaded to any server.</p>
+  </section>
+
+  <section class="panel" id="dropzone">
+    <div class="drop" id="dz1"><input type="file" id="f1" accept="image/*"><div class="box" id="bx1"><span class="ic">◐</span><b>Before · T1</b><span class="sub">drop or click</span><img hidden></div></div>
+    <div class="arrow">→</div>
+    <div class="drop" id="dz2"><input type="file" id="f2" accept="image/*"><div class="box" id="bx2"><span class="ic">◑</span><b>After · T2</b><span class="sub">drop or click</span><img hidden></div></div>
+  </section>
+
+  <section class="runbar">
+    <button id="run" disabled>Run change detection</button>
+    <div class="engine" id="engine">
+      <span class="dot"></span> engine ready
+    </div>
+  </section>
+  <p class="status" id="status"></p>
+
+  <section class="panel results" id="results" hidden>
+    <div class="grid3">
+      <figure><figcaption><b>Input pair</b><span id="align"></span></figcaption><div class="figsplit"><img id="in1"><img id="in2"></div></figure>
+      <figure><figcaption><b>Change probability</b><span class="muted" id="probMeta"></span></figcaption><canvas id="probCv" width="512" height="512"></canvas></figure>
+      <figure><figcaption><b>Change mask</b><span><span class="chip" id="changedPct">–</span></span></figcaption><canvas id="maskCv" width="512" height="512"></canvas></figure>
+    </div>
+
+    <div class="controls">
+      <div class="ctl">
+        <label for="thr">Mask threshold <output id="thrOut">0.50</output></label>
+        <input type="range" id="thr" min="1" max="99" value="50" step="1">
+      </div>
+      <div class="ctl small">
+        <label>Auto-threshold (Otsu) <output id="otsuOut">–</output></label>
+      </div>
+      <div class="ctl small">
+        <label>Inference <output id="timeOut">–</output></label>
+      </div>
+      <div class="ctl small">
+        <label>Cleanup (drop tiny blobs)</label>
+        <input type="checkbox" id="clean" checked>
+      </div>
+      <div class="ctl">
+        <a class="btn" id="dlMask" download="change_mask.png">⬇ mask</a>
+        <a class="btn" id="dlProb" download="change_probability.png">⬇ prob</a>
+      </div>
+    </div>
+  </section>
+
+  <section class="panel how">
+    <h3>How this demo works</h3>
+    <ol>
+      <li><b>Align</b> — a fast phase-correlation estimator checks whether the two images are the same scene and reports a match score.</li>
+      <li><b>Infer</b> — a Siamese U-Net change detector (trained on remote-sensing imagery) runs in your browser via ONNX + WebAssembly.</li>
+      <li><b>Explain</b> — an Otsu threshold finds a sensible split, tiny blobs are cleaned, and you can fine-tune the cutoff live.</li>
+    </ol>
+  </section>
+</main>
+
+<footer>Built with PyTorch → ONNX → onnxruntime-web · static, serverless, private</footer>
+
+<script src="https://cdn.jsdelivr.net/npm/onnxruntime-web@1.20.1/dist/ort.min.js"></script>
+<script src="app.js"></script>
+</body>
+</html>
