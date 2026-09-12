@@ -46,6 +46,43 @@ body {
   50% { stroke: rgba(57,240,168,.25); stroke-width:5; }
 }
 
+#planet {
+  position: fixed; left:0; top:0; z-index: 1; width:210px; height:210px;
+  pointer-events: none; will-change: transform;
+}
+#planet .ball {
+  position:absolute; left:50%; top:50%; width:86px; height:86px;
+  margin:-43px 0 0 -43px; border-radius:50%; z-index:2;
+  background:
+    radial-gradient(circle at 32% 28%, rgba(255,255,255,.55), transparent 46%),
+    radial-gradient(circle, #ecd0a0 0%, #d9a06b 55%, #8a5230 100%);
+}
+#planet .band { position:absolute; left:50%; top:50%; width:86px; height:86px;
+  margin:-43px 0 0 -43px; border-radius:50%; z-index:3; mix-blend-mode:multiply; opacity:.7;
+  background: repeating-linear-gradient(0deg, rgba(20,10,5,.35) 0 9px, transparent 9px 20px); }
+#planet .light { position:absolute; left:50%; top:50%; width:86px; height:86px;
+  margin:-43px 0 0 -43px; border-radius:50%; z-index:4;
+  background: radial-gradient(circle at 30% 26%, rgba(255,255,255,.28), transparent 55%),
+              radial-gradient(circle at 70% 78%, rgba(10,10,20,.55), transparent 60%); }
+#planet .ring { position:absolute; left:50%; top:50%; width:214px; height:152px;
+  margin:-76px 0 0 -107px; z-index:1;
+  transform: rotateX(71deg) rotateZ(-6deg);
+  border-radius:50%;
+  border:7px solid rgba(205,222,255,.5);
+  box-shadow: 0 0 26px rgba(160,180,255,.35), inset 0 0 18px rgba(205,222,255,.35); }
+#planet .ring::after {
+  content:""; position:absolute; inset:-7px; border-radius:50%;
+  border:7px solid rgba(205,222,255,.12); }
+#planet .ringfront {
+  content:""; position:absolute; left:50%; top:50%; width:214px; height:152px;
+  margin:-76px 0 0 -107px; z-index:5; pointer-events:none;
+  transform: rotateX(71deg) rotateZ(-6deg); border-radius:50%;
+  border:7px solid rgba(205,222,255,.5);
+  clip-path: inset(50% 0 0 0);
+  box-shadow: 0 -4px 26px rgba(160,180,255,.25);
+}
+@keyframes planetSpin { to { transform: rotate(360deg); } }
+
 header {
   position: relative; z-index: 3;
   display:flex; align-items:center; justify-content:space-between;
@@ -165,9 +202,20 @@ input[type=checkbox] { accent-color:var(--accent); width:18px; height:18px; }
 
 footer { position: relative; z-index: 3; text-align:center; color:#59637a; font-size:12.5px; padding:28px; }
 
+@media (max-width:1060px) {
+  #sat3d { width:180px; height:auto; }
+  #planet { transform: scale(.8); }
+}
 @media (max-width:900px) {
   .grid3 { grid-template-columns:1fr; }
   #dropzone { flex-direction:column; }
   .arrow { transform:rotate(90deg); }
   header { padding:18px 20px; }
+  #planet, #stage { opacity:.35; }
+}
+@media (max-width:640px) {
+  #planet, #stage { display:none; }
+  main { padding:0 16px 32px; }
+  header { padding:14px 16px; }
+  .runbar { flex-wrap:wrap; }
 }
