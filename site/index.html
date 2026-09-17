@@ -3,7 +3,11 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>SatQuery · Satellite Change Detection</title>
+<meta name="description" content="SatQuery — on-device satellite change detection and single-scene analysis. Powered by PyTorch, ONNX and WebAssembly. Nothing leaves your browser.">
+<title>SatQuery — Ask a satellite · on-device change detection</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="style.css">
 <link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>🛰️</text></svg>">
 </head>
@@ -62,25 +66,46 @@
 </div>
 
 <header>
-  <div class="logo"><span class="sat">🛰️</span><div><h1>SatQuery</h1><p>satellite change detection · runs 100% in your browser</p></div></div>
+  <div class="logo"><span class="sat">🛰️</span><div><h1>SatQuery</h1><p>satellite intelligence · 100% in your browser</p></div></div>
   <a class="gh" href="https://github.com/" target="_blank" rel="noopener">GitHub ↗</a>
 </header>
 
 <main>
-  <section class="intro">
-    <h2>What changed between these two views?</h2>
-    <p>Upload an image pair of the same area from two dates. A change-detection model (~6M params) is loaded into your browser as WebAssembly and infers a change map locally — nothing is uploaded to any server.</p>
+  <section class="hero">
+    <span class="pill">privacy-first · nothing ever uploaded</span>
+    <h2>Ask a satellite.</h2>
+    <p>Load one frame or two. SatQuery answers <b>two kinds of question</b> — what changed between two dates, and what a single scene is made of. The whole model, ~6M parameters, runs on your device.</p>
+  </section>
+
+  <section class="modes" id="modes" role="tablist" aria-label="Query mode">
+    <button class="mode active" data-mode="pair" role="tab" aria-selected="true">
+      <span class="m-ic">⇄</span>
+      <span class="m-txt"><b>Compare two dates</b><small>Spot every change in a before &amp; after</small></span>
+    </button>
+    <button class="mode" data-mode="single" role="tab" aria-selected="false">
+      <span class="m-ic">◉</span>
+      <span class="m-txt"><b>Inspect one scene</b><small>Read a single image's land cover</small></span>
+    </button>
   </section>
 
   <section class="panel" id="dropzone">
-    <div class="drop" id="dz1"><input type="file" id="f1" accept="image/*"><div class="box" id="bx1"><span class="ic">◐</span><b>Before · T1</b><span class="sub">drop or click</span><img hidden></div></div>
-    <div class="arrow">→</div>
-    <div class="drop" id="dz2"><input type="file" id="f2" accept="image/*"><div class="box" id="bx2"><span class="ic">◑</span><b>After · T2</b><span class="sub">drop or click</span><img hidden></div></div>
+    <p class="hint" id="hint">Both images should picture the same ground — ideally surveyed on different dates.</p>
+    <div class="dzn">
+      <div class="drop" id="dz1">
+        <input type="file" id="f1" accept="image/*">
+        <div class="box" id="bx1"><span class="ic">◐</span><b>Before · T1</b><span class="sub">drop or click to choose</span><img hidden></div>
+      </div>
+      <div class="arrow" id="arrow">→</div>
+      <div class="drop" id="dz2">
+        <input type="file" id="f2" accept="image/*">
+        <div class="box" id="bx2"><span class="ic">◑</span><b>After · T2</b><span class="sub">drop or click to choose</span><img hidden></div>
+      </div>
+    </div>
   </section>
 
   <section class="runbar">
-    <button id="run" disabled>Run change detection</button>
-    <button id="sceneBtn" class="ghost" disabled>Analyze scene (single image)</button>
+    <button id="run">Detect changes</button>
+    <button id="sceneBtn" class="ghost">Inspect single image</button>
     <div class="engine" id="engine">
       <span class="dot"></span> engine ready
     </div>
@@ -106,7 +131,7 @@
         <label>Inference <output id="timeOut">–</output></label>
       </div>
       <div class="ctl small">
-        <label>Cleanup (drop tiny blobs)</label>
+        <label>Drop tiny blobs</label>
         <input type="checkbox" id="clean" checked>
       </div>
       <div class="ctl">
@@ -117,10 +142,10 @@
   </section>
 
   <section class="panel results" id="scene" hidden>
-    <h3 class="ptitle">Scene analysis<span id="sceneWhich"></span></h3>
+    <h3 class="ptitle">Scene readout<span id="sceneWhich"></span></h3>
     <div class="grid3">
-      <figure><figcaption><b>Analyzed image</b></figcaption><div class="figsplit"><img id="scIn"><div></div></div></figure>
-      <figure><figcaption><b>Land cover map</b></figcaption><canvas id="scCv" width="256" height="256"></canvas></figure>
+      <figure><figcaption><b>Your image</b></figcaption><div class="figsplit"><img id="scIn"><div></div></div></figure>
+      <figure><figcaption><b>Land cover map</b><span class="muted" id="scMeta"></span></figcaption><canvas id="scCv" width="256" height="256"></canvas></figure>
       <figure>
         <figcaption><b>What's in this image</b><span class="chip" id="scDom">–</span></figcaption>
         <div class="expl" id="scExplain">–</div>
@@ -130,16 +155,16 @@
   </section>
 
   <section class="panel how">
-    <h3>How this demo works</h3>
+    <h3>How satellite intelligence works here</h3>
     <ol>
-      <li><b>Align</b> — a fast phase-correlation estimator checks whether the two images are the same scene and reports a match score.</li>
-      <li><b>Infer</b> — a Siamese U-Net change detector (trained on remote-sensing imagery) runs in your browser via ONNX + WebAssembly.</li>
-      <li><b>Explain</b> — an Otsu threshold finds a sensible split, tiny blobs are cleaned, and you can fine-tune the cutoff live.</li>
+      <li><b>Align</b> — a phase-correlation pass confirms both frames view the same ground and reports a match score.</li>
+      <li><b>Infer</b> — a Siamese U-Net trained on remote-sensing imagery compares the pair <i>(or reads the single scene)</i> — in your browser, via ONNX + WebAssembly.</li>
+      <li><b>Explain</b> — an Otsu threshold isolates what changed, a cleanup pass drops speckle, and a live slider lets you tune the cut to your liking.</li>
     </ol>
   </section>
 </main>
 
-<footer>Built with PyTorch → ONNX → onnxruntime-web · static, serverless, private</footer>
+<footer>Built with PyTorch · ONNX · onnxruntime-web — no servers, no uploads, no tracking. Your imagery stays on your device.</footer>
 
 <script src="https://cdn.jsdelivr.net/npm/onnxruntime-web@1.20.1/dist/ort.min.js"></script>
 <script src="app.js"></script>

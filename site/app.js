@@ -272,6 +272,8 @@ const el = {
   dz1: $('#dz1'), dz2: $('#dz2'),
   f1: $('#f1'), f2: $('#f2'),
   bx1: $('#bx1'), bx2: $('#bx2'),
+  modes: [...document.querySelectorAll('.mode')],
+  hint: $('#hint'), arrow: $('#arrow'),
   run: $('#run'), engine: $('#engine'), status: $('#status'),
   results: $('#results'), in1: $('#in1'), in2: $('#in2'),
   align: $('#align'), probCv: $('#probCv'), maskCv: $('#maskCv'),
@@ -280,9 +282,10 @@ const el = {
   clean: $('#clean'), dlMask: $('#dlMask'), dlProb: $('#dlProb'),
   sceneBtn: $('#sceneBtn'), scene: $('#scene'), scIn: $('#scIn'), scCv: $('#scCv'),
   scExplain: $('#scExplain'), scDom: $('#scDom'), scLegend: $('#scLegend'), scWhich: $('#sceneWhich'),
+  scMeta: $('#scMeta'),
 };
 
-const state = { img1: null, img2: null, probs: null, mask: null, otsu: 0.5 };
+const state = { img1: null, img2: null, probs: null, mask: null, otsu: 0.5, mode: 'pair' };
 
 let session = null, sessionPromise = null;
 
@@ -333,6 +336,36 @@ function setEngineReady() {
 function updateRunState() {
   el.run.disabled = !(state.img1 && state.img2);
   el.sceneBtn.disabled = !(state.img1 || state.img2);
+}
+
+/* Swap between "compare two dates" (pair) and "inspect one scene" (single). */
+function setMode(m) {
+  state.mode = m;
+  for (const b of el.modes) {
+    const on = b.dataset.mode === m;
+    b.classList.toggle('active', on);
+    b.setAttribute('aria-selected', on);
+  }
+  document.body.classList.toggle('single', m === 'single');
+  el.dz2.hidden = m === 'single';
+  el.arrow.hidden = m === 'single';
+  const title = el.bx1.querySelector('b');
+  const sub = el.bx1.querySelector('.sub');
+  if (m === 'single') {
+    title.textContent = 'Your satellite scene';
+    sub.textContent = 'one image is all we need';
+    el.hint.textContent = 'A single satellite frame or aerial shot is enough — SatQuery reads the land cover inside it.';
+    el.run.hidden = true;
+    el.sceneBtn.textContent = 'Read this scene';
+    el.sceneBtn.classList.add('primary');
+  } else {
+    title.textContent = 'Before · T1';
+    sub.textContent = 'drop or click to choose';
+    el.hint.textContent = 'Both images should picture the same ground — ideally surveyed on different dates.';
+    el.run.hidden = false;
+    el.sceneBtn.textContent = 'Inspect single image';
+    el.sceneBtn.classList.remove('primary');
+  }
 }
 
 function wireDrop(dz, input, box, setter) {
@@ -479,8 +512,10 @@ function drawSceneMap({ ctx, ids, explainEl }) {
 function runScene() {
   const img = state.img1 || state.img2;
   if (!img) return;
-  const which = state.img1 && !state.img2 ? ' (T1 · before)' : state.img2 && !state.img1 ? ' (T2 · after)' : ' (T1 · before)';
-  el.scWhich.textContent = 'using image' + which;
+  const which = state.mode === 'single'
+    ? ''
+    : (state.img2 && !state.img1 ? ' (T2 · after)' : ' (T1 · before)');
+  el.scWhich.textContent = which;
   setStatus('Analyzing scene…');
   try {
     const t0 = performance.now();
@@ -489,6 +524,7 @@ function runScene() {
     const elapsed = ((performance.now() - t0) / 1000).toFixed(2);
 
     drawSceneMap({ ctx: el.scCv.getContext('2d'), ids });
+    el.scMeta.textContent = 'RGB heuristic · 256² grid';
     const text = describeScene(counts, ids);
     el.scExplain.textContent = text;
     const sorted = [];
@@ -531,6 +567,9 @@ el.sceneBtn.addEventListener('click', () => {
   setStatus('');
   runScene();
 });
+
+for (const b of el.modes) b.addEventListener('click', () => setMode(b.dataset.mode));
+setMode('pair');
 updateRunState();
 
 // checkerboard indicator showing engine warms up

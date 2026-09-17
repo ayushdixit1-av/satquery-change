@@ -1,18 +1,21 @@
-# SatQuery — Satellite Change Detection Demo
+# SatQuery — Ask a satellite
 
-Upload a before/after image pair of the same area. A ~6 M-parameter change-detection model runs **100 % in your browser** via WebAssembly — nothing is uploaded to any server.
+A privacy-first, browser-only satellite assistant. **Ask a satellite** two kinds of question and get a plain-language answer — your imagery never leaves your device.
+
+- 🛰️ **Compare two dates** — detect every change between a before/after pair of the same ground.
+- 🔍 **Inspect one scene** — a single image is enough; SatQuery reads its land cover and explains the scene.
+- 🛡️ **100 % on-device** — a ~6 M-parameter model runs in your browser via ONNX + WebAssembly. No servers, no uploads, no tracking.
 
 ## Live Demo
 
-After deploying, visit  
+After deploying, visit
 `https://<your-username>.github.io/<repo>/`
 
 ## How It Works
 
-1. **ResNet encoder** processes each image independently (shared weights).
-2. **Fusion layer** compares encodings via concatenation + element-wise diff + element-wise product.
-3. **Decoder** upsamples fused features back to 512 × 512.
-4. **Otsu auto-threshold** picks a sensible cutoff; connected-component cleanup removes tiny blobs.
+1. **Align** — a phase-correlation pass verifies both frames view the same ground and reports a match score.
+2. **Infer** — a Siamese U-Net change detector (trained on remote-sensing imagery) runs in your browser via ONNX + WebAssembly.
+3. **Explain** — an Otsu threshold isolates what changed, a cleanup pass drops speckle, and a live slider lets you tune the cut to your liking.
 
 Model: `T1T2ChangeDetector` (Siamese U-Net) — exported to ONNX with opset 18, 0.2 MB graph + 23 MB weights (~24 MB total).
 
