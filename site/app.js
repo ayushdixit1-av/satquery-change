@@ -264,6 +264,97 @@ function describeScene(counts, ids) {
 }
 function ids2cls() { return []; }
 
+/* Label connected components (4-connectivity, union-find) of a binary mask.
+   Returns [{count, minX, minY, maxX, maxY, sumX, sumY}] per component. */
+function labelBlobs(mask) {
+  const n = SIZE * SIZE;
+  const parent = new Int32Array(n).fill(-1);
+  const find = (a) => { while (parent[a] !== a) { parent[a] = parent[parent[a]]; a = parent[a]; } return a; };
+  const union = (a, b) => {
+    if (parent[b] === -1) return;
+    if (parent[a] === -1) parent[a] = a;
+    const ra = find(a), rb = find(b);
+    if (ra !== rb) parent[ra] = rb;
+  };
+  for (let y = 0; y < SIZE; y++) {
+    for (let x = 0; x < SIZE; x++) {
+      const i = y * SIZE + x;
+      if (!mask[i]) continue;
+      if (parent[i] === -1) parent[i] = i;
+      if (x > 0 && mask[i - 1]) union(i, i - 1);
+      if (y > 0 && mask[i - SIZE]) union(i, i - SIZE);
+    }
+  }
+  const comps = new Map();
+  for (let y = 0; y < SIZE; y++) {
+    for (let x = 0; x < SIZE; x++) {
+      const i = y * SIZE + x;
+      if (!mask[i]) continue;
+      const r = find(i);
+      let c = comps.get(r);
+      if (!c) { c = { count: 0, minX: x, maxX: x, minY: y, maxY: y, sumX: 0, sumY: 0 }; comps.set(r, c); }
+      c.count++; c.minX = Math.min(c.minX, x); c.maxX = Math.max(c.maxX, x);
+      c.minY = Math.min(c.minY, y); c.maxY = Math.max(c.maxY, y);
+      c.sumX += x; c.sumY += y;
+    }
+  }
+  return [...comps.values()];
+}
+
+const bandName = (fy, fx) =>
+  `${fy < 0.36 ? 'top' : fy > 0.64 ? 'bottom' : 'middle'}-${fx < 0.36 ? 'left' : fx > 0.64 ? 'right' : 'center'}`;
+
+/* Natural-language readout of WHERE the changes are, from a binary mask. */
+function describeChanges(mask) {
+  const n = SIZE * SIZE;
+  let total = 0;
+  for (let i = 0; i < n; i++) if (mask[i]) total++;
+  if (total === 0) return 'Nothing above the mask threshold — try lowering it.';
+  if (total <= 12) return 'Only a tiny speck of change (under 0.01% of the scene) — probably sensor noise.';
+
+  const blobs = labelBlobs(mask).sort((a, b) => b.count - a.count);
+  const share = (c) => Math.round(100 * c.count / total);
+  const loc = (c) => bandName(c.sumY / c.count / SIZE, c.sumX / c.count / SIZE);
+
+  if (blobs.length === 1) {
+    const b = blobs[0];
+    return `One area of change in the ${loc(b)} — a single ${share(b)}% of the changed pixels, spanning ${Math.round(100 * b.count / n)}% of the scene.`;
+  }
+  if (blobs.length <= 6) {
+    const top = blobs.slice(0, 3).map((b) => `${loc(b)} (${share(b)}% of change)`).join(', ');
+    return `Change forms ${blobs.length} distinct clusters. Largest: ${top}.`;
+  }
+  const top = blobs[0];
+  return `Change is scattered (${blobs.length} patches). The largest patch sits in the ${loc(top)} with ${share(top)}% of all change.`;
+}
+
+function changeBoxes(mask, minArea) {
+  return labelBlobs(mask)
+    .filter((c) => c.count >= minArea)
+    .map((c) => ({ x0: c.minX, y0: c.minY, x1: c.maxX, y1: c.maxY }));
+}
+
+/* Redraw the change-region boxes over the T2 image. Uses state.boxes (512-space). */
+function drawOverlay() {
+  const cv = el.ovCv;
+  const rect = el.in2wrap.getBoundingClientRect();
+  if (!rect.width || !rect.height) return;
+  const dpr = window.devicePixelRatio || 1;
+  cv.width = Math.max(1, Math.round(rect.width * dpr));
+  cv.height = Math.max(1, Math.round(rect.height * dpr));
+  const ctx = cv.getContext('2d');
+  ctx.clearRect(0, 0, cv.width, cv.height);
+  const boxes = state.boxes || [];
+  if (!boxes.length) return;
+  const sx = cv.width / SIZE, sy = cv.height / SIZE;
+  const pad = 2;
+  ctx.lineWidth = Math.max(1.5, 2 * dpr);
+  ctx.strokeStyle = '#ff4d4f';
+  for (const b of boxes) {
+    ctx.strokeRect((b.x0 - pad) * sx, (b.y0 - pad) * sy, (b.x1 - b.x0 + 2 * pad) * sx, (b.y1 - b.y0 + 2 * pad) * sy);
+  }
+}
+
 /* ============================ DOM glue ============================ */
 
 const $ = (s) => document.querySelector(s);
@@ -275,9 +366,9 @@ const el = {
   modes: [...document.querySelectorAll('.mode')],
   hint: $('#hint'), arrow: $('#arrow'),
   run: $('#run'), engine: $('#engine'), status: $('#status'),
-  results: $('#results'), in1: $('#in1'), in2: $('#in2'),
+  results: $('#results'), in1: $('#in1'), in2: $('#in2'), in2wrap: $('#in2wrap'), ovCv: $('#ovCv'),
   align: $('#align'), probCv: $('#probCv'), maskCv: $('#maskCv'),
-  probMeta: $('#probMeta'), changedPct: $('#changedPct'),
+  probMeta: $('#probMeta'), changedPct: $('#changedPct'), whereTxt: $('#whereTxt'),
   thr: $('#thr'), thrOut: $('#thrOut'), otsuOut: $('#otsuOut'), timeOut: $('#timeOut'),
   clean: $('#clean'), dlMask: $('#dlMask'), dlProb: $('#dlProb'),
   sceneBtn: $('#sceneBtn'), scene: $('#scene'), scIn: $('#scIn'), scCv: $('#scCv'),
@@ -438,6 +529,9 @@ function drawMask({ maskCv, data, out }) {
   }
   ctx.putImageData(id, 0, 0);
   state.mask = cleaned;
+  el.whereTxt.textContent = describeChanges(cleaned);
+  state.boxes = changeBoxes(cleaned, 64);
+  drawOverlay();
 }
 
 async function runModel() {
@@ -476,10 +570,10 @@ async function runModel() {
     el.thrOut.textContent = o.thr.toFixed(2);
 
     drawProbMap({ probCv: el.probCv, data: probs, probMeta: el.probMeta });
+    el.in1.src = state.img1.src; el.in2.src = state.img2.src;
     drawMask({ maskCv: el.maskCv, data: probs, out: el.thr });
     el.timeOut.textContent = elapsed + ' s';
 
-    el.in1.src = state.img1.src; el.in2.src = state.img2.src;
     el.results.hidden = false;
     el.dlMask.addEventListener('click', () => saveCanvas(el.maskCv, 'change_mask.png'));
     el.dlProb.addEventListener('click', () => saveCanvas(el.probCv, 'change_probability.png'));
@@ -571,6 +665,9 @@ el.sceneBtn.addEventListener('click', () => {
 for (const b of el.modes) b.addEventListener('click', () => setMode(b.dataset.mode));
 setMode('pair');
 updateRunState();
+
+el.in2.addEventListener('load', drawOverlay);
+window.addEventListener('resize', drawOverlay);
 
 // checkerboard indicator showing engine warms up
 setEngineReady();

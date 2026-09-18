@@ -114,10 +114,12 @@
 
   <section class="panel results" id="results" hidden>
     <div class="grid3">
-      <figure><figcaption><b>Input pair</b><span id="align"></span></figcaption><div class="figsplit"><img id="in1"><img id="in2"></div></figure>
+      <figure><figcaption><b>Input pair</b><span id="align"></span></figcaption><div class="figsplit"><img id="in1"><div class="ov" id="in2wrap"><img id="in2"><canvas id="ovCv"></canvas></div></div></figure>
       <figure><figcaption><b>Change probability</b><span class="muted" id="probMeta"></span></figcaption><canvas id="probCv" width="512" height="512"></canvas></figure>
       <figure><figcaption><b>Change mask</b><span><span class="chip" id="changedPct">–</span></span></figcaption><canvas id="maskCv" width="512" height="512"></canvas></figure>
     </div>
+
+    <div class="where" id="whereBox"><b>Where it changed</b><span id="whereTxt">–</span></div>
 
     <div class="controls">
       <div class="ctl">
