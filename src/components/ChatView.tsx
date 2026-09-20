@@ -12,7 +12,7 @@ import {
 } from 'lucide-react';
 import type { AnalysisItem, ChatMessage, SatQuerySettings } from '../types';
 import { CAPABILITY_TAGS, createAnalysisFromQuery } from '../data/mockData';
-import { generateSketchedEvidence } from '../utils/imageSketch';
+import { generateSketchedEvidence, describeChanges } from '../utils/imageSketch';
 import SwipeCompare from './SwipeCompare';
 
 export interface ChatViewProps {
@@ -133,17 +133,19 @@ const ChatView: React.FC<ChatViewProps> = ({ settings, onInspect, onAddRecent, i
             analysis.trace = ['Live endpoint unreachable — fell back to on-device engine', ...(analysis.trace ?? [])];
           }
         }
-        // 2) Client-side canvas contour synthesis (always)
+        // 2) Client-side evidence synthesis: pixel mask + change zone boxes (always)
         const evidence = await generateSketchedEvidence(t1f.url, t2f.url);
         analysis.changeMask = evidence.evidenceUrl;
         analysis.thumbnail = evidence.evidenceUrl;
         analysis.metrics.changedAreaKm2 = evidence.changedKm2;
         analysis.metrics.changedAreaPct = evidence.changedPct;
+        analysis.summary = describeChanges(evidence);
         analysis.trace = [
           'Imagery pair ingested (T1 baseline & T2 observation)',
           'Multi-temporal spatial registration aligned',
-          'Feature difference map computed on canvas',
-          'Neon contour evidence and bounds rendered on T2',
+          'Pixel-difference mask computed on canvas',
+          `${evidence.regionCount} change zone${evidence.regionCount === 1 ? '' : 's'} isolated, boxed and ranked`,
+          'Boxed evidence + plain-text change summary rendered on T2',
         ];
         onAddRecent(analysis);
       } else {
@@ -154,9 +156,8 @@ const ChatView: React.FC<ChatViewProps> = ({ settings, onInspect, onAddRecent, i
         id: uid(),
         role: 'assistant',
         content:
-          'Done. ' +
           analysis.summary +
-          ' Ready metrics: ' +
+          '\n\nReady metrics: ' +
           `Precision ${analysis.metrics.precision.toFixed(1)}, ` +
           `Recall ${analysis.metrics.recall.toFixed(1)}, ` +
           `F1 ${analysis.metrics.f1.toFixed(1)}, IoU ${analysis.metrics.iou.toFixed(1)}.`,

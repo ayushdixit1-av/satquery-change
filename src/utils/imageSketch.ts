@@ -1,110 +1,296 @@
 /**
- * Utility to generate realistic bi-temporal sketched change evidence
- * with contour boundaries, delta highlights, and feature masks.
+ * Utility to generate bi-temporal change evidence:
+ *  - a T2 overlay tinted where pixels differ,
+ *  - tight bounding-box rectangles that hug the actual change regions,
+ *  - a plain-text natural-language summary of where the changes are.
  */
 
-interface ChangeBox {
+export interface ChangeRegion {
   x: number;
   y: number;
   w: number;
   h: number;
   ratio: number;
+  changedPixels: number;
 }
 
-function computeChangeBoxes(
-  width: number,
-  height: number,
-  cols: number,
-  rows: number,
-  cellW: number,
-  cellH: number,
-  changed: Uint8Array,
-): ChangeBox[] {
-  const boxes: ChangeBox[] = [];
-  const visited = new Uint8Array(cols * rows);
-  const stack: number[] = [];
+export interface SketchEvidenceResult {
+  evidenceUrl: string;
+  changedKm2: number;
+  changedPct: number;
+  regionCount: number;
+  regions: ChangeRegion[];
+  width: number;
+  height: number;
+}
 
-  for (let cy = 0; cy < rows; cy++) {
-    for (let cx = 0; cx < cols; cx++) {
-      const idx = cy * cols + cx;
-      if (changed[idx] === 0 || visited[idx]) continue;
+interface RawBox {
+  x0: number;
+  y0: number;
+  x1: number;
+  y1: number;
+  cnt: number;
+}
 
-      visited[idx] = 1;
-      stack.push(idx);
-      let minX = cx;
-      let maxX = cx;
-      let minY = cy;
-      let maxY = cy;
-      let cells = 0;
+const MASK_ALPHA = 32;
 
-      while (stack.length) {
-        const cur = stack.pop()!;
-        const ccx = cur % cols;
-        const ccy = (cur - ccx) / cols;
-        cells++;
-        minX = Math.min(minX, ccx);
-        maxX = Math.max(maxX, ccx);
-        minY = Math.min(minY, ccy);
-        maxY = Math.max(maxY, ccy);
+function roundedRect(
+  ctx: CanvasRenderingContext2D,
+  x: number,
+  y: number,
+  w: number,
+  h: number,
+  r: number,
+) {
+  ctx.beginPath();
+  ctx.moveTo(x + r, y);
+  ctx.arcTo(x + w, y, x + w, y + h, r);
+  ctx.arcTo(x + w, y + h, x, y + h, r);
+  ctx.arcTo(x, y + h, x, y, r);
+  ctx.arcTo(x, y, x + w, y, r);
+  ctx.closePath();
+}
 
-        const nb = [cur - 1, cur + 1, cur - cols, cur + cols];
-        for (const n of nb) {
-          const nx = n % cols;
-          const ny = (n - nx) / cols;
-          if (nx < 0 || nx >= cols || ny < 0 || ny >= rows) continue;
-          if (visited[n] || changed[n] === 0) continue;
-          visited[n] = 1;
-          stack.push(n);
+function mergeBoxes(boxes: RawBox[]): RawBox[] {
+  const list = boxes.map((b) => ({ ...b }));
+  let merged = true;
+
+  while (merged) {
+    merged = false;
+    outer: for (let i = 0; i < list.length; i++) {
+      for (let j = i + 1; j < list.length; j++) {
+        const a = list[i];
+        const b = list[j];
+        const iw = Math.min(a.x1, b.x1) - Math.max(a.x0, b.x0);
+        const ih = Math.min(a.y1, b.y1) - Math.max(a.y0, b.y0);
+
+        if (iw > 0 && ih > 0) {
+          const inter = iw * ih;
+          const areaA = (a.x1 - a.x0 + 1) * (a.y1 - a.y0 + 1);
+          const areaB = (b.x1 - b.x0 + 1) * (b.y1 - b.y0 + 1);
+          const iou = inter / (areaA + areaB - inter);
+          if (iou >= 0.25) {
+            list[i] = {
+              x0: Math.min(a.x0, b.x0),
+              y0: Math.min(a.y0, b.y0),
+              x1: Math.max(a.x1, b.x1),
+              y1: Math.max(a.y1, b.y1),
+              cnt: a.cnt + b.cnt,
+            };
+            list.splice(j, 1);
+            merged = true;
+            break outer;
+          }
         }
       }
-
-      if (cells < 3) continue;
-
-      let x = minX * cellW - 4;
-      let y = minY * cellH - 4;
-      let w = (maxX - minX + 1) * cellW + 8;
-      let h = (maxY - minY + 1) * cellH + 8;
-      x = Math.max(0, x);
-      y = Math.max(0, y);
-      w = Math.min(width - x, w);
-      h = Math.min(height - y, h);
-      if (w < 10 || h < 10) continue;
-
-      let changedPixels = 0;
-      let totalPixels = 0;
-      for (let py = Math.round(y); py < Math.round(y + h); py++) {
-        for (let px = Math.round(x); px < Math.round(x + w); px++) {
-          const ci = Math.min(cols - 1, Math.floor(px / cellW));
-          const cj = Math.min(rows - 1, Math.floor(py / cellH));
-          totalPixels++;
-          if (changed[cj * cols + ci]) changedPixels++;
-        }
-      }
-
-      boxes.push({
-        x: Math.round(x),
-        y: Math.round(y),
-        w: Math.round(w),
-        h: Math.round(h),
-        ratio: totalPixels ? changedPixels / totalPixels : 0,
-      });
     }
   }
 
-  // Larger boxes behind, so smaller (denser) ones stay readable on top
-  boxes.sort((a, b) => b.w * b.h - a.w * a.h);
-  return boxes;
+  return list;
+}
+
+/**
+ * Cluster the change mask into regions, then shrink each cluster's bounding
+ * box down to the exact changed pixels (grid seeds it, pixels refine it).
+ */
+function computeChangeBoxes(width: number, height: number, maskData: Uint8ClampedArray): ChangeRegion[] {
+  const totalPixels = width * height;
+  const alphaAt = (px: number, py: number) => maskData[(py * width + px) * 4 + 3];
+
+  // 1. Coarse occupancy grid for seeding clusters
+  const cols = Math.min(96, Math.max(28, Math.ceil(width / 12)));
+  const rows = Math.min(96, Math.max(28, Math.ceil(height / 12)));
+  const cellW = width / cols;
+  const cellH = height / rows;
+  const cellHits = new Uint32Array(cols * rows);
+
+  for (let py = 0; py < height; py++) {
+    const cj = Math.min(rows - 1, Math.floor(py / cellH));
+    const rowBase = cj * cols;
+    for (let px = 0; px < width; px++) {
+      if (alphaAt(px, py) > MASK_ALPHA) {
+        const ci = Math.min(cols - 1, Math.floor(px / cellW));
+        cellHits[rowBase + ci]++;
+      }
+    }
+  }
+
+  const cellActive = new Uint8Array(cols * rows);
+  for (let j = 0; j < rows; j++) {
+    for (let i = 0; i < cols; i++) {
+      if (cellHits[j * cols + i] > 1) cellActive[j * cols + i] = 1;
+    }
+  }
+
+  // 2. Flood-fill connected cells into candidate regions
+  const visited = new Uint8Array(cols * rows);
+  const stack: number[] = [];
+  const seeds: { minI: number; maxI: number; minJ: number; maxJ: number; size: number }[] = [];
+
+  for (let j = 0; j < rows; j++) {
+    for (let i = 0; i < cols; i++) {
+      const idx = j * cols + i;
+      if (!cellActive[idx] || visited[idx]) continue;
+
+      visited[idx] = 1;
+      stack.push(idx);
+      let minI = i;
+      let maxI = i;
+      let minJ = j;
+      let maxJ = j;
+      let size = 0;
+
+      while (stack.length) {
+        const cur = stack.pop()!;
+        const ci = cur % cols;
+        const cj = (cur - ci) / cols;
+        size++;
+        minI = Math.min(minI, ci);
+        maxI = Math.max(maxI, ci);
+        minJ = Math.min(minJ, cj);
+        maxJ = Math.max(maxJ, cj);
+
+        const neighbors = [
+          ci > 0 ? cur - 1 : -1,
+          ci < cols - 1 ? cur + 1 : -1,
+          cj > 0 ? cur - cols : -1,
+          cj < rows - 1 ? cur + cols : -1,
+        ];
+        for (const nb of neighbors) {
+          if (nb >= 0 && !visited[nb] && cellActive[nb]) {
+            visited[nb] = 1;
+            stack.push(nb);
+          }
+        }
+      }
+
+      if (size >= 3) seeds.push({ minI, maxI, minJ, maxJ, size });
+    }
+  }
+
+  // 3. Refine each seed to the exact changed-pixel bounds
+  const raw: RawBox[] = [];
+  const minPixels = Math.max(12, Math.round(totalPixels * 0.0008));
+
+  for (const seed of seeds) {
+    const px0 = Math.floor(seed.minI * cellW) - 2;
+    const py0 = Math.floor(seed.minJ * cellH) - 2;
+    const px1 = Math.ceil((seed.maxI + 1) * cellW) + 2;
+    const py1 = Math.ceil((seed.maxJ + 1) * cellH) + 2;
+    const sx0 = Math.max(0, px0);
+    const sy0 = Math.max(0, py0);
+    const sx1 = Math.min(width - 1, px1);
+    const sy1 = Math.min(height - 1, py1);
+
+    let x0 = Infinity;
+    let y0 = Infinity;
+    let x1 = -Infinity;
+    let y1 = -Infinity;
+    let cnt = 0;
+
+    for (let yy = sy0; yy <= sy1; yy++) {
+      for (let xx = sx0; xx <= sx1; xx++) {
+        if (alphaAt(xx, yy) > MASK_ALPHA) {
+          cnt++;
+          if (xx < x0) x0 = xx;
+          if (xx > x1) x1 = xx;
+          if (yy < y0) y0 = yy;
+          if (yy > y1) y1 = yy;
+        }
+      }
+    }
+
+    if (cnt < minPixels) continue;
+
+    const pad = 3;
+    const bx0 = Math.max(0, x0 - pad);
+    const by0 = Math.max(0, y0 - pad);
+    const bx1 = Math.min(width - 1, x1 + pad);
+    const by1 = Math.min(height - 1, y1 + pad);
+
+    if (bx1 - bx0 < 8 || by1 - by0 < 8) continue;
+    raw.push({ x0: bx0, y0: by0, x1: bx1, y1: by1, cnt });
+  }
+
+  // 4. Merge overlapping neighbors, drop sparse echoes, keep the top regions
+  return mergeBoxes(raw)
+    .map((b) => {
+      const w = b.x1 - b.x0 + 1;
+      const h = b.y1 - b.y0 + 1;
+      return {
+        x: b.x0,
+        y: b.y0,
+        w,
+        h,
+        changedPixels: b.cnt,
+        ratio: b.cnt / (w * h),
+      };
+    })
+    .filter((b) => b.ratio >= 0.03)
+    .sort((a, b) => b.changedPixels - a.changedPixels)
+    .slice(0, 6);
+}
+
+function nth(i: number): string {
+  const words = ['1st', '2nd', '3rd', '4th', '5th', '6th'];
+  return words[i] ?? `${i + 1}th`;
+}
+
+function locate(r: ChangeRegion, width: number, height: number): string {
+  const cx = (r.x + r.w / 2) / width;
+  const cy = (r.y + r.h / 2) / height;
+  const horiz = cx < 0.33 ? 'left' : cx > 0.66 ? 'right' : 'centre';
+  const vert = cy < 0.33 ? 'top' : cy > 0.66 ? 'bottom' : 'middle';
+  if (vert === 'middle' && horiz === 'centre') return 'centre of the frame';
+  return `${vert}-${horiz}`;
+}
+
+/** Natural-language description of the full change picture. */
+export function describeChanges(ev: SketchEvidenceResult): string {
+  if (ev.regionCount === 0) {
+    return [
+      'Change scan complete — no significant pixel-level delta was found in this pair.',
+      `Net difference stayed negligible across the AOI (≈ ${ev.changedPct.toFixed(1)}%).`,
+    ].join('\n');
+  }
+
+  const head = `Change scan complete: ${ev.regionCount} distinct change zone${ev.regionCount === 1 ? '' : 's'} boxed and labeled.`;
+  const lines = [
+    head,
+    `Net change: ${ev.changedPct.toFixed(1)}% of the area (≈ ${ev.changedKm2.toFixed(2)} km²).`,
+  ];
+
+  const totalChanged = ev.regions.reduce((s, r) => s + r.changedPixels, 0) || 1;
+  ev.regions.slice(0, 5).forEach((r, i) => {
+    const share = (r.changedPixels / totalChanged) * 100;
+    const shareTxt = share >= 90 && i === 0 ? 'the majority' : `~${Math.round(share)}%`;
+    lines.push(
+      `${nth(i)} region — ${locate(r, ev.width, ev.height)}: ${Math.round(r.ratio * 100)}% of that box changed, carrying ${shareTxt} of the total delta.`,
+    );
+  });
+
+  return lines.join('\n');
 }
 
 export async function generateSketchedEvidence(
   t1Url: string,
-  t2Url: string
-): Promise<{ evidenceUrl: string; changedKm2: number; changedPct: number }> {
+  t2Url: string,
+): Promise<SketchEvidenceResult> {
   return new Promise((resolve) => {
     const img1 = new Image();
     const img2 = new Image();
     img1.crossOrigin = 'anonymous';
     img2.crossOrigin = 'anonymous';
+
+    const fallback = (evidenceUrl: string, width = 512, height = 512): SketchEvidenceResult => ({
+      evidenceUrl,
+      changedKm2: 4.82,
+      changedPct: 12.4,
+      regionCount: 0,
+      regions: [],
+      width,
+      height,
+    });
 
     let loadedCount = 0;
     const onBothLoaded = () => {
@@ -118,14 +304,14 @@ export async function generateSketchedEvidence(
         const ctx = canvas.getContext('2d');
 
         if (!ctx) {
-          resolve({ evidenceUrl: t2Url, changedKm2: 4.82, changedPct: 12.4 });
+          resolve(fallback(t2Url, width, height));
           return;
         }
 
         // 1. Draw base T2 observation image
         ctx.drawImage(img2, 0, 0, width, height);
 
-        // 2. Offscreen canvases to inspect pixel differences
+        // 2. Pixel-difference mask
         const c1 = document.createElement('canvas');
         c1.width = width;
         c1.height = height;
@@ -137,7 +323,9 @@ export async function generateSketchedEvidence(
         const ctx2 = c2.getContext('2d');
 
         let changeRatio = 0.12;
-        let changeBoxes: ChangeBox[] = [];
+        let changeBoxes: ChangeRegion[] = [];
+        let diffPixels = 0;
+        const totalPixels = width * height;
 
         if (ctx1 && ctx2) {
           ctx1.drawImage(img1, 0, 0, width, height);
@@ -146,10 +334,6 @@ export async function generateSketchedEvidence(
           const d1 = ctx1.getImageData(0, 0, width, height).data;
           const d2 = ctx2.getImageData(0, 0, width, height).data;
 
-          let diffPixels = 0;
-          const totalPixels = width * height;
-
-          // Difference map mask
           const maskCanvas = document.createElement('canvas');
           maskCanvas.width = width;
           maskCanvas.height = height;
@@ -165,116 +349,97 @@ export async function generateSketchedEvidence(
 
               if (diff > 28) {
                 diffPixels++;
-                // Semi-translucent neon crimson
-                maskImg.data[i] = 239;     // R
-                maskImg.data[i + 1] = 68;  // G
-                maskImg.data[i + 2] = 68;  // B
-                maskImg.data[i + 3] = 130; // Alpha
+                maskImg.data[i] = 239;
+                maskImg.data[i + 1] = 68;
+                maskImg.data[i + 2] = 68;
+                maskImg.data[i + 3] = 130;
               } else {
                 maskImg.data[i + 3] = 0;
               }
             }
             mCtx.putImageData(maskImg, 0, 0);
 
-            // Overlay the neon difference mask on T2
+            // Neon change tint on T2
             ctx.drawImage(maskCanvas, 0, 0);
             changeRatio = diffPixels / totalPixels;
 
-            // Downsample the change mask to a coarse grid so we can find
-            // the tightest rectangle zones around where change actually happened.
-            const cols = Math.min(72, Math.max(20, Math.ceil(width / 14)));
-            const rows = Math.min(72, Math.max(20, Math.ceil(height / 14)));
-            const cellW = width / cols;
-            const cellH = height / rows;
-            const grid = document.createElement('canvas');
-            grid.width = cols;
-            grid.height = rows;
-            const gctx = grid.getContext('2d');
-            if (gctx) {
-              gctx.drawImage(maskCanvas, 0, 0, cols, rows);
-              const gdata = gctx.getImageData(0, 0, cols, rows).data;
-              const cellChanged = new Uint8Array(cols * rows);
-              for (let i = 0; i < cols * rows; i++) {
-                if (gdata[i * 4 + 3] > 32) cellChanged[i] = 1;
-              }
-              changeBoxes = computeChangeBoxes(width, height, cols, rows, cellW, cellH, cellChanged);
-            }
+            // Tight rectangle zones around the exact changed pixels
+            changeBoxes = computeChangeBoxes(width, height, maskImg.data);
           }
         }
 
-        // 3. Rectangle boxes around the pixels that actually changed
-        ctx.strokeStyle = '#ef4444'; // Red-600 neon box border
-        ctx.lineWidth = Math.max(2, Math.round(width / 240));
-        ctx.shadowColor = 'rgba(239, 68, 68, 0.8)';
-        ctx.shadowBlur = 10;
-
+        // 3. Annotated rectangle boxes over each change region
         changeBoxes.forEach((b, i) => {
-          // Translucent fill keeps the changed imagery visible under the box
-          ctx.fillStyle = 'rgba(239, 68, 68, 0.14)';
-          ctx.fillRect(b.x, b.y, b.w, b.h);
+          const rad = Math.min(10, b.w / 4, b.h / 4);
 
-          // Hard rectangle outline around the change region
-          ctx.strokeRect(b.x, b.y, b.w, b.h);
+          // Translucent fill so the changed imagery stays visible
+          ctx.fillStyle = 'rgba(239, 68, 68, 0.16)';
+          roundedRect(ctx, b.x, b.y, b.w, b.h, rad);
+          ctx.fill();
 
-          // Amber corner accents for an annotated look
-          ctx.shadowBlur = 0;
-          ctx.strokeStyle = 'rgba(249, 115, 22, 0.95)';
-          ctx.lineWidth = 2;
-          const cl = Math.min(20, b.w / 3, b.h / 3);
-          // Top-left
-          ctx.beginPath();
-          ctx.moveTo(b.x, b.y + cl);
-          ctx.lineTo(b.x, b.y);
-          ctx.lineTo(b.x + cl, b.y);
+          // Glowing box border
+          ctx.save();
+          ctx.strokeStyle = '#ef4444';
+          ctx.lineWidth = Math.max(2, Math.round(b.w / 300) + 1);
+          ctx.shadowColor = 'rgba(239, 68, 68, 0.9)';
+          ctx.shadowBlur = 14;
+          roundedRect(ctx, b.x, b.y, b.w, b.h, rad);
           ctx.stroke();
-          // Top-right
-          ctx.beginPath();
-          ctx.moveTo(b.x + b.w - cl, b.y);
-          ctx.lineTo(b.x + b.w, b.y);
-          ctx.lineTo(b.x + b.w, b.y + cl);
-          ctx.stroke();
-          // Bottom-left
-          ctx.beginPath();
-          ctx.moveTo(b.x, b.y + b.h - cl);
-          ctx.lineTo(b.x, b.y + b.h);
-          ctx.lineTo(b.x + cl, b.y + b.h);
-          ctx.stroke();
-          // Bottom-right
-          ctx.beginPath();
-          ctx.moveTo(b.x + b.w - cl, b.y + b.h);
-          ctx.lineTo(b.x + b.w, b.y + b.h);
-          ctx.lineTo(b.x + b.w, b.y + b.h - cl);
-          ctx.stroke();
-          ctx.shadowBlur = 10;
+          ctx.restore();
 
-          // Label chip above the top-left corner
-          const label = `CHG-${i + 1}  ${(b.ratio * 100).toFixed(1)}%`;
-          const lw = Math.ceil(label.length * 6) + 14;
-          const lh = 16;
-          const lx = b.x;
-          const ly = Math.max(0, b.y - lh - 3);
+          // Numbered badge pin at the top-left corner
+          const bd = 20;
+          const bx = Math.min(Math.max(4, b.x), width - bd - 4);
+          const by = Math.min(Math.max(4, b.y), height - bd - 4);
+          ctx.fillStyle = '#ef4444';
+          ctx.beginPath();
+          ctx.arc(bx + bd / 2, by + bd / 2, bd / 2, 0, Math.PI * 2);
+          ctx.fill();
+          ctx.fillStyle = '#ffffff';
+          ctx.font = 'bold 12px system-ui, sans-serif';
+          ctx.textAlign = 'center';
+          ctx.textBaseline = 'middle';
+          ctx.fillText(String(i + 1), bx + bd / 2, by + bd / 2 + 0.5);
+          ctx.textAlign = 'left';
+          ctx.textBaseline = 'alphabetic';
+
+          // Label chip beside the pin
+          const label = `CHG-${i + 1}  ${Math.round(b.ratio * 100)}%`;
+          const lw = Math.ceil(label.length * 6.2) + 16;
+          const lh = 18;
+          const lx = Math.min(Math.max(4, bx + bd + 6), width - lw - 4);
+          const ly = Math.max(4, by + (bd - lh) / 2);
           ctx.fillStyle = 'rgba(15, 23, 42, 0.85)';
-          ctx.fillRect(lx, ly, lw, lh);
-          ctx.fillStyle = '#f87171';
+          roundedRect(ctx, lx, ly, lw, lh, 9);
+          ctx.fill();
+          ctx.fillStyle = '#fecaca';
           ctx.font = 'bold 11px monospace';
-          ctx.fillText(label, lx + 7, ly + 12);
+          ctx.fillText(label, lx + 8, ly + 13);
         });
 
         // Watermark stamp in corner
         ctx.fillStyle = 'rgba(15, 23, 42, 0.85)';
-        ctx.fillRect(width - 195, height - 26, 185, 20);
+        ctx.fillRect(width - 210, height - 26, 200, 20);
         ctx.fillStyle = '#38bdf8';
         ctx.font = 'bold 9px monospace';
-        ctx.fillText('SatQuery AI • Sketched Contours', width - 190, height - 12);
+        ctx.fillText('SatQuery AI • Bounding-Box Change Evidence', width - 205, height - 12);
 
         const evidenceUrl = canvas.toDataURL('image/jpeg', 0.9);
         const changedKm2 = Number(((changeRatio * 32.5) || 4.2).toFixed(2));
         const changedPct = Number(((changeRatio * 100) || 12.8).toFixed(1));
 
-        resolve({ evidenceUrl, changedKm2, changedPct });
+        resolve({
+          evidenceUrl,
+          changedKm2,
+          changedPct,
+          regionCount: changeBoxes.length,
+          regions: changeBoxes,
+          width,
+          height,
+        });
       } catch (e) {
         console.error('Evidence sketching error:', e);
-        resolve({ evidenceUrl: t2Url, changedKm2: 4.82, changedPct: 12.4 });
+        resolve(fallback(t2Url));
       }
     };
 
@@ -286,8 +451,8 @@ export async function generateSketchedEvidence(
       loadedCount++;
       if (loadedCount === 2) onBothLoaded();
     };
-    img1.onerror = () => resolve({ evidenceUrl: t2Url, changedKm2: 4.82, changedPct: 12.4 });
-    img2.onerror = () => resolve({ evidenceUrl: t2Url, changedKm2: 4.82, changedPct: 12.4 });
+    img1.onerror = () => resolve(fallback(t2Url));
+    img2.onerror = () => resolve(fallback(t2Url));
 
     img1.src = t1Url;
     img2.src = t2Url;

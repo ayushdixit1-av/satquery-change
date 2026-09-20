@@ -274,7 +274,9 @@ const AnalysisModal: React.FC<AnalysisModalProps> = ({ analysis, onClose }) => {
                 <span className="flex items-center gap-1.5">
                   <Percent className="h-3.5 w-3.5 text-emerald-400" /> {m.changedAreaPct.toFixed(1)}% of AOI
                 </span>
-                <span className="ml-auto text-[10px] text-slate-500">{analysis.summary}</span>
+                <span className="ml-auto max-w-md whitespace-pre-line text-right text-[10px] leading-relaxed text-slate-500">
+                  {analysis.summary}
+                </span>
               </div>
             </div>
           </div>
