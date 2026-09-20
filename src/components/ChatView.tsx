@@ -13,7 +13,9 @@ import {
 import type { AnalysisItem, ChatMessage, SatQuerySettings } from '../types';
 import { CAPABILITY_TAGS, createAnalysisFromQuery } from '../data/mockData';
 import { generateSketchedEvidence, describeChanges } from '../utils/imageSketch';
+import { analyzeScene } from '../utils/sceneAnalysis';
 import SwipeCompare from './SwipeCompare';
+import SceneResultCard from './SceneResultCard';
 
 export interface ChatViewProps {
   settings: SatQuerySettings;
@@ -56,6 +58,7 @@ const ChatView: React.FC<ChatViewProps> = ({ settings, onInspect, onAddRecent, i
   const [t1, setT1] = useState<AttachFile | null>(null);
   const [t2, setT2] = useState<AttachFile | null>(null);
   const [thinking, setThinking] = useState(false);
+  const [analyzingScene, setAnalyzingScene] = useState(false);
   const listRef = useRef<HTMLDivElement | null>(null);
 
   const scrollToBottom = () => {
@@ -98,10 +101,10 @@ const ChatView: React.FC<ChatViewProps> = ({ settings, onInspect, onAddRecent, i
     const t2f = t2;
 
     try {
-      let analysis: AnalysisItem;
+      const pair = t1f && t2f;
 
-      if (t1f && t2f) {
-        analysis = createAnalysisFromQuery(query, {
+      if (pair) {
+        const analysis = createAnalysisFromQuery(query, {
           t1Url: t1f.url,
           t2Url: t2f.url,
           customTitle: query,
@@ -148,27 +151,51 @@ const ChatView: React.FC<ChatViewProps> = ({ settings, onInspect, onAddRecent, i
           'Boxed evidence + plain-text change summary rendered on T2',
         ];
         onAddRecent(analysis);
-      } else {
-        analysis = createAnalysisFromQuery(query);
-      }
 
-      const assistantMsg: ChatMessage = {
-        id: uid(),
-        role: 'assistant',
-        content:
-          analysis.summary +
-          '\n\nReady metrics: ' +
-          `Precision ${analysis.metrics.precision.toFixed(1)}, ` +
-          `Recall ${analysis.metrics.recall.toFixed(1)}, ` +
-          `F1 ${analysis.metrics.f1.toFixed(1)}, IoU ${analysis.metrics.iou.toFixed(1)}.`,
-        timestamp: new Date().toISOString(),
-        analysis: t1f && t2f ? analysis : undefined,
-        attachments:
-          t1f && t2f
-            ? { t1Url: t1f.url, t2Url: t2f.url, t1Name: t1f.name, t2Name: t2f.name }
-            : undefined,
-      };
-      setMessages((m) => [...m, assistantMsg]);
+        setMessages((m) => [
+          ...m,
+          {
+            id: uid(),
+            role: 'assistant',
+            content:
+              analysis.summary +
+              '\n\nReady metrics: ' +
+              `Precision ${analysis.metrics.precision.toFixed(1)}, ` +
+              `Recall ${analysis.metrics.recall.toFixed(1)}, ` +
+              `F1 ${analysis.metrics.f1.toFixed(1)}, IoU ${analysis.metrics.iou.toFixed(1)}.`,
+            timestamp: new Date().toISOString(),
+            analysis,
+            attachments: { t1Url: t1f.url, t2Url: t2f.url, t1Name: t1f.name, t2Name: t2f.name },
+          },
+        ]);
+      } else if (t1f || t2f) {
+        // Single-image scene analysis
+        setAnalyzingScene(true);
+        const single = t1f ?? (t2f as AttachFile);
+        const scene = await analyzeScene(single.url, single.name);
+        setMessages((m) => [
+          ...m,
+          {
+            id: uid(),
+            role: 'assistant',
+            content: scene.description,
+            timestamp: new Date().toISOString(),
+            scene,
+            attachments: { t1Url: single.url, t1Name: single.name },
+          },
+        ]);
+      } else {
+        const analysis = createAnalysisFromQuery(query);
+        setMessages((m) => [
+          ...m,
+          {
+            id: uid(),
+            role: 'assistant',
+            content: analysis.summary,
+            timestamp: new Date().toISOString(),
+          },
+        ]);
+      }
     } catch (e) {
       console.error(e);
       setMessages((m) => [
@@ -182,6 +209,7 @@ const ChatView: React.FC<ChatViewProps> = ({ settings, onInspect, onAddRecent, i
       ]);
     } finally {
       setThinking(false);
+      setAnalyzingScene(false);
       setT1(null);
       setT2(null);
       scrollToBottom();
@@ -223,7 +251,7 @@ const ChatView: React.FC<ChatViewProps> = ({ settings, onInspect, onAddRecent, i
                 Ask a satellite anything about the surface of the Earth
               </p>
               <p className="mt-1 text-xs font-medium text-slate-500">
-                Attach a T1 (before) and T2 (after) image pair, or ask first and attach when prompted.
+                Attach one image to analyze the scene in detail, or attach two (T1 &#38; T2) to measure what changed between them.
               </p>
             </div>
           )}
@@ -255,6 +283,8 @@ const ChatView: React.FC<ChatViewProps> = ({ settings, onInspect, onAddRecent, i
                   {new Date(msg.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
                 </p>
 
+                {msg.scene && <SceneResultCard scene={msg.scene} />}
+
                 {msg.analysis && (
                   <div className="mt-3 rounded-2xl bg-white/70 p-2.5 ring-1 ring-slate-200/80">
                     <SwipeCompare t1={msg.analysis.t1Image} t2={msg.analysis.t2Image} className="w-full" />
@@ -280,7 +310,11 @@ const ChatView: React.FC<ChatViewProps> = ({ settings, onInspect, onAddRecent, i
             <div className="flex justify-start">
               <div className="flex items-center gap-2 rounded-3xl rounded-bl-md bg-white px-4 py-3 text-sm font-semibold text-slate-700">
                 <Loader2 className="h-4 w-4 animate-spin text-sky-500" />
-                <span>Aligning frames, computing deltas, drawing contours…</span>
+                <span>
+                  {analyzingScene
+                    ? 'Reading the scene, classifying land cover, computing indices…'
+                    : 'Aligning frames, computing deltas, drawing change boxes…'}
+                </span>
               </div>
             </div>
           )}
@@ -325,12 +359,12 @@ const ChatView: React.FC<ChatViewProps> = ({ settings, onInspect, onAddRecent, i
           )}
 
           <div className="flex items-end gap-2">
-            <label className="glass-input flex cursor-pointer items-center gap-1.5 rounded-xl px-3 py-2.5 text-xs font-bold text-slate-600 transition-colors hover:bg-slate-100/70" title="Attach T1 baseline">
+            <label className="glass-input flex cursor-pointer items-center gap-1.5 rounded-xl px-3 py-2.5 text-xs font-bold text-slate-600 transition-colors hover:bg-slate-100/70" title="Attach a single image for scene analysis (or use it as the T1 baseline)">
               <FileImage className="h-4 w-4 text-indigo-500" />
-              T1
+              Image
               <input type="file" accept="image/*" className="hidden" onChange={(e) => attach('t1', e.target.files?.[0] ?? null)} />
             </label>
-            <label className="glass-input flex cursor-pointer items-center gap-1.5 rounded-xl px-3 py-2.5 text-xs font-bold text-slate-600 transition-colors hover:bg-slate-100/70" title="Attach T2 observation">
+            <label className="glass-input flex cursor-pointer items-center gap-1.5 rounded-xl px-3 py-2.5 text-xs font-bold text-slate-600 transition-colors hover:bg-slate-100/70" title="Attach a second image for change detection (optional)">
               <FileImage className="h-4 w-4 text-emerald-500" />
               T2
               <input type="file" accept="image/*" className="hidden" onChange={(e) => attach('t2', e.target.files?.[0] ?? null)} />
@@ -345,7 +379,7 @@ const ChatView: React.FC<ChatViewProps> = ({ settings, onInspect, onAddRecent, i
                   run();
                 }
               }}
-              placeholder="Ask about changes between your images…"
+              placeholder="Ask about one image, or attach two to measure change…"
               className="glass-input min-w-0 flex-1 rounded-xl px-4 py-2.5 text-sm font-medium text-slate-800 placeholder:text-slate-400 outline-none"
               aria-label="Chat message"
             />

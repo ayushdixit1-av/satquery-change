@@ -102,6 +102,7 @@ const App: React.FC = () => {
 
   const handleFeature = (action: string) => {
     const map: Record<string, string> = {
+      'chat-scene': 'Describe this scene in full — land cover, vegetation health, water and structure.',
       'chat-ask': 'Show me what changed near the dock between June and now.',
       'chat-multi': 'Run a full multi-task scan: land cover, NDVI health and water extent over this AOI.',
       'chat-evidence': 'Give me an evidence-based answer with precision and recall on this imagery pair.',

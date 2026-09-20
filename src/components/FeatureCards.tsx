@@ -4,6 +4,7 @@ import {
   MessageCircleQuestion,
   Layers3,
   BadgeCheck,
+  ScanSearch,
   ArrowUpRight,
   type LucideIcon,
 } from 'lucide-react';
@@ -22,6 +23,14 @@ interface FeatureCard {
 }
 
 const CARDS: FeatureCard[] = [
+  {
+    icon: ScanSearch,
+    title: 'Analyze One Image',
+    desc: 'Drop a single scene — land-cover shares, vegetation health, water extent, brightness and structure, all explained in plain text.',
+    action: 'chat-scene',
+    tint: 'bg-cyan-100 text-cyan-700',
+    ring: 'group-hover:ring-cyan-400/40',
+  },
   {
     icon: ImagePlus,
     title: 'Upload Images',
@@ -62,7 +71,7 @@ const FeatureCards: React.FC<FeatureCardsProps> = ({ onAction }) => (
       <div>
         <p className="text-[11px] font-bold uppercase tracking-[0.16em] text-sky-400">Capabilities</p>
         <h3 className="mt-1 text-xl font-extrabold tracking-tight text-slate-100">
-          Four ways to interrogate the surface of the Earth
+          Five ways to interrogate the surface of the Earth
         </h3>
       </div>
     </div>

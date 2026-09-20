@@ -27,6 +27,7 @@ export interface ChatMessage {
   content: string;
   timestamp: string;
   analysis?: AnalysisItem;
+  scene?: SceneResult;
   attachments?: {
     t1Url?: string;
     t2Url?: string;
@@ -57,3 +58,23 @@ export const DEFAULT_SETTINGS: SatQuerySettings = {
 
 export type AnalysisCategory = AnalysisItem['category'];
 export type AnalysisViewMode = 'sidebyside' | 'swipe';
+
+export interface SceneClassShare {
+  label: string;
+  pct: number;
+  color: string;
+}
+
+export interface SceneResult {
+  imageUrl: string;
+  fileName: string;
+  classes: SceneClassShare[];
+  dominant: string;
+  vegetationHealth: number;
+  waterPct: number;
+  urbanPct: number;
+  brightness: number;
+  detail: number;
+  cloudPct: number;
+  description: string;
+}

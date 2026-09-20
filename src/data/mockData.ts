@@ -1,6 +1,7 @@
 import { AnalysisItem } from '../types';
 
 export const CAPABILITY_TAGS = [
+  'Single-Scene Classification',
   'Bi-temporal Change Detection',
   'Urban Surface Growth',
   'Vegetation Health (NDVI)',
