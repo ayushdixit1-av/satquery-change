@@ -1,0 +1,82 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>SatQuery · One-scene inspector</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="style.css">
+<link rel="stylesheet" href="single.css">
+<link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>🛰️</text></svg>">
+</head>
+<body class="single">
+<canvas id="stars"></canvas>
+
+<header>
+  <a class="logo link" href="index.html">
+    <span class="sat">🛰️</span>
+    <div><h1>SatQuery</h1><p>ask the ground what it's made of</p></div>
+  </a>
+  <nav class="topnav">
+    <a href="index.html">Detect changes →</a>
+  </nav>
+</header>
+
+<main class="single-main">
+  <section class="single-hero">
+    <span class="pill">single image · no model download · instant</span>
+    <h2>What's in this one frame?</h2>
+    <p>
+      Drop a single satellite or aerial shot. SatQuery reads the land cover straight from
+      its colours — shadow, water, vegetation, bare soil, built-up ground and clouds —
+      and tells you, in plain language, what the scene is mostly made of.
+    </p>
+  </section>
+
+  <section class="single-drop" id="dz">
+    <input type="file" id="f1" accept="image/*">
+    <div class="single-box" id="bx1">
+      <span class="ic">🪟</span>
+      <b>Your satellite frame</b>
+      <span class="sub">drop it here or click to choose</span>
+      <img hidden>
+    </div>
+  </section>
+
+  <section class="single-runbar">
+    <button id="sceneRun" class="primary">Read this scene</button>
+    <span class="engine" id="sEngine"><span class="dot"></span> heuristics · no uploads</span>
+  </section>
+  <p class="status" id="status"></p>
+
+  <section class="panel scene-results" id="scene" hidden>
+    <div class="scene-top">
+      <h3>Scene readout <span id="sceneWhich"></span></h3>
+      <span class="engine-note">RGB land-cover heuristic · 256² grid</span>
+    </div>
+    <div class="scene-grid">
+      <figure>
+        <figcaption><b>Your image</b></figcaption>
+        <img id="scIn">
+      </figure>
+      <figure>
+        <figcaption><b>Land cover map<span class="muted" id="scMeta"></span></b></figcaption>
+        <canvas id="scCv" width="256" height="256"></canvas>
+      </figure>
+      <figure>
+        <figcaption><b>What's in the scene</b><span class="chip" id="scDom">–</span></figcaption>
+        <div class="expl single-expl" id="scExplain">–</div>
+      </figure>
+    </div>
+    <div class="legend" id="scLegend"></div>
+  </section>
+</main>
+
+<footer>SatQuery · one-scene inspector — everything runs inside your browser, nothing leaves it.</footer>
+
+<script src="single.js"></script>
+<script src="bg.js"></script>
+</body>
+</html>

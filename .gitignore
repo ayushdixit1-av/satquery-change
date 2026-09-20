@@ -30,3 +30,20 @@ Thumbs.db
 # IDE
 .vscode/
 .idea/
+
+# Node
+node_modules/
+
+# Local storytelling tooling (large audio + composition checkouts)
+.agents/
+brag-output/
+skills-lock.json
+
+# One-off experiment / probe scripts at repo root
+/build*.js
+/probe*.js
+/r6.js
+/scan.js
+/glue2.js
+/check_ids.js
+metadata.json
