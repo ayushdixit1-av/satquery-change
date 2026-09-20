@@ -34,6 +34,115 @@ interface RawBox {
 
 const MASK_ALPHA = 32;
 
+/** Heat-ramp tint for a given change magnitude (0..1). Green → yellow → red. */
+export function heatTint(score: number): { r: number; g: number; b: number; a: number } {
+  const s = Math.max(0, Math.min(1, score));
+  let r: number;
+  let g: number;
+  let b: number;
+  if (s < 0.33) {
+    const t = s / 0.33;
+    r = 74 + (250 - 74) * t;
+    g = 222 + (204 - 222) * t;
+    b = 128 + (21 - 128) * t;
+  } else if (s < 0.66) {
+    const t = (s - 0.33) / 0.33;
+    r = 250 + (249 - 250) * t;
+    g = 204 + (115 - 204) * t;
+    b = 21 + (22 - 21) * t;
+  } else {
+    const t = (s - 0.66) / 0.34;
+    r = 249;
+    g = 115 - 115 * t;
+    b = 22;
+  }
+  const a = Math.round(34 + s * 110);
+  return { r, g, b, a };
+}
+
+function drawCornerBrackets(
+  ctx: CanvasRenderingContext2D,
+  x: number,
+  y: number,
+  w: number,
+  h: number,
+  color: string,
+  lw: number,
+  brace: number,
+) {
+  const b = Math.max(8, brace);
+  ctx.strokeStyle = color;
+  ctx.lineWidth = lw;
+  ctx.lineCap = 'round';
+  ctx.beginPath();
+  // top-left
+  ctx.moveTo(x, y + b);
+  ctx.lineTo(x, y);
+  ctx.lineTo(x + b, y);
+  // top-right
+  ctx.moveTo(x + w - b, y);
+  ctx.lineTo(x + w, y);
+  ctx.lineTo(x + w, y + b);
+  // bottom-right
+  ctx.moveTo(x + w, y + h - b);
+  ctx.lineTo(x + w, y + h);
+  ctx.lineTo(x + w - b, y + h);
+  // bottom-left
+  ctx.moveTo(x + b, y + h);
+  ctx.lineTo(x, y + h);
+  ctx.lineTo(x, y + h - b);
+  ctx.stroke();
+}
+
+function drawPin(
+  ctx: CanvasRenderingContext2D,
+  x: number,
+  y: number,
+  label: string,
+  sub: string,
+  width: number,
+  height: number,
+  hue: number,
+) {
+  const bd = 22;
+  const bx = Math.min(Math.max(6, x), width - bd - 6);
+  const by = Math.min(Math.max(6, y), height - bd - 6);
+
+  // pin ring
+  ctx.save();
+  ctx.shadowColor = `hsla(${hue}, 90%, 55%, 0.9)`;
+  ctx.shadowBlur = 10;
+  ctx.beginPath();
+  ctx.arc(bx + bd / 2, by + bd / 2, bd / 2, 0, Math.PI * 2);
+  ctx.fillStyle = `hsl(${hue}, 92%, 46%)`;
+  ctx.fill();
+  ctx.restore();
+  ctx.lineWidth = 2;
+  ctx.strokeStyle = 'rgba(255,255,255,0.85)';
+  ctx.stroke();
+
+  ctx.fillStyle = '#ffffff';
+  ctx.font = 'bold 12px system-ui, sans-serif';
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  ctx.fillText(String(label), bx + bd / 2, by + bd / 2 + 0.5);
+  ctx.textAlign = 'left';
+  ctx.textBaseline = 'alphabetic';
+
+  const text = `${label} ${sub}`;
+  const lw = Math.ceil(text.length * 6.2) + 18;
+  const lh = 20;
+  const lx = Math.min(Math.max(6, bx + bd + 8), width - lw - 6);
+  const ly = Math.max(6, by + (bd - lh) / 2);
+
+  ctx.fillStyle = 'rgba(2, 6, 23, 0.82)';
+  roundedRect(ctx, lx, ly, lw, lh, 10);
+  ctx.fill();
+  ctx.fillStyle = `hsl(${hue}, 95%, 80%)`;
+  ctx.font = 'bold 10px ui-monospace, monospace';
+  ctx.fillText(text, lx + 10, ly + 14);
+}
+
 function roundedRect(
   ctx: CanvasRenderingContext2D,
   x: number,
@@ -390,18 +499,24 @@ export async function generateSketchedEvidence(
 
               if (diff > 42) {
                 diffPixels++;
-                maskImg.data[i] = 239;
-                maskImg.data[i + 1] = 68;
-                maskImg.data[i + 2] = 68;
-                maskImg.data[i + 3] = 130;
+                const tint = heatTint((diff - 42) / 200);
+                maskImg.data[i] = tint.r;
+                maskImg.data[i + 1] = tint.g;
+                maskImg.data[i + 2] = tint.b;
+                maskImg.data[i + 3] = tint.a;
               } else {
                 maskImg.data[i + 3] = 0;
               }
             }
             mCtx.putImageData(maskImg, 0, 0);
 
-            // Neon change tint on T2
+            // Heat-tinted change overlay on T2 (severity ramps green → yellow → red)
             ctx.drawImage(maskCanvas, 0, 0);
+            ctx.save();
+            ctx.globalCompositeOperation = 'lighter';
+            ctx.globalAlpha = 0.5;
+            ctx.drawImage(maskCanvas, 0, 0);
+            ctx.restore();
             changeRatio = diffPixels / totalPixels;
 
             // Tight rectangle zones around the exact changed pixels
@@ -409,61 +524,64 @@ export async function generateSketchedEvidence(
           }
         }
 
-        // 3. Annotated rectangle boxes over each change region
-        changeBoxes.forEach((b, i) => {
-          const rad = Math.min(10, b.w / 4, b.h / 4);
-
-          // Translucent fill so the changed imagery stays visible
-          ctx.fillStyle = 'rgba(239, 68, 68, 0.16)';
-          roundedRect(ctx, b.x, b.y, b.w, b.h, rad);
+        // 3. Spotlight: darken the frame, punch bright holes over the change zones
+        ctx.save();
+        ctx.fillStyle = 'rgba(3, 7, 18, 0.4)';
+        ctx.fillRect(0, 0, width, height);
+        ctx.globalCompositeOperation = 'destination-out';
+        changeBoxes.forEach((b) => {
+          roundedRect(ctx, b.x - 7, b.y - 7, b.w + 14, b.h + 14, Math.min(12, (b.w + 14) / 4));
           ctx.fill();
+        });
+        ctx.restore();
 
-          // Glowing box border
+        // 4. Corner-bracket boundaries + numbered pins over each change zone
+        changeBoxes.forEach((b, i) => {
+          const hue = 348 - i * 24;
+          const brace = Math.min(22, Math.max(10, Math.round(b.w / 14)));
+          const glow = `hsla(${hue}, 92%, 56%, 0.85)`;
+
           ctx.save();
-          ctx.strokeStyle = '#ef4444';
-          ctx.lineWidth = Math.max(2, Math.round(b.w / 300) + 1);
-          ctx.shadowColor = 'rgba(239, 68, 68, 0.9)';
-          ctx.shadowBlur = 14;
-          roundedRect(ctx, b.x, b.y, b.w, b.h, rad);
-          ctx.stroke();
+          ctx.shadowColor = glow;
+          ctx.shadowBlur = 12;
+          drawCornerBrackets(ctx, b.x, b.y, b.w, b.h, `hsl(${hue}, 92%, 62%)`, Math.max(2.5, Math.round(b.w / 220)), brace);
           ctx.restore();
 
-          // Numbered badge pin at the top-left corner
-          const bd = 20;
-          const bx = Math.min(Math.max(4, b.x), width - bd - 4);
-          const by = Math.min(Math.max(4, b.y), height - bd - 4);
-          ctx.fillStyle = '#ef4444';
-          ctx.beginPath();
-          ctx.arc(bx + bd / 2, by + bd / 2, bd / 2, 0, Math.PI * 2);
+          // faint fill so the changed imagery stays visible
+          ctx.fillStyle = `hsla(${hue}, 90%, 50%, 0.14)`;
+          roundedRect(ctx, b.x, b.y, b.w, b.h, Math.min(10, b.w / 4));
           ctx.fill();
-          ctx.fillStyle = '#ffffff';
-          ctx.font = 'bold 12px system-ui, sans-serif';
-          ctx.textAlign = 'center';
-          ctx.textBaseline = 'middle';
-          ctx.fillText(String(i + 1), bx + bd / 2, by + bd / 2 + 0.5);
-          ctx.textAlign = 'left';
-          ctx.textBaseline = 'alphabetic';
 
-          // Label chip beside the pin
-          const label = `CHG-${i + 1}  ${Math.round(b.ratio * 100)}%`;
-          const lw = Math.ceil(label.length * 6.2) + 16;
-          const lh = 18;
-          const lx = Math.min(Math.max(4, bx + bd + 6), width - lw - 4);
-          const ly = Math.max(4, by + (bd - lh) / 2);
-          ctx.fillStyle = 'rgba(15, 23, 42, 0.85)';
-          roundedRect(ctx, lx, ly, lw, lh, 9);
-          ctx.fill();
-          ctx.fillStyle = '#fecaca';
-          ctx.font = 'bold 11px monospace';
-          ctx.fillText(label, lx + 8, ly + 13);
+          drawPin(ctx, b.x, b.y, String(i + 1), `${Math.round(b.ratio * 100)}%`, width, height, hue);
         });
 
-        // Watermark stamp in corner
-        ctx.fillStyle = 'rgba(15, 23, 42, 0.85)';
-        ctx.fillRect(width - 210, height - 26, 200, 20);
-        ctx.fillStyle = '#38bdf8';
+        // 5. Change-intensity legend + watermark
+        const legendW = 150;
+        const legendH = 9;
+        const lx0 = 14;
+        const ly0 = height - 22;
+        ctx.save();
+        ctx.fillStyle = 'rgba(2, 6, 23, 0.82)';
+        roundedRect(ctx, lx0 - 8, ly0 - 7, legendW + 16, 24, 8);
+        ctx.fill();
+        const grad = ctx.createLinearGradient(lx0, 0, lx0 + legendW, 0);
+        grad.addColorStop(0, '#4ade80');
+        grad.addColorStop(0.33, '#facc15');
+        grad.addColorStop(0.66, '#f97316');
+        grad.addColorStop(1, '#ef4444');
+        ctx.fillStyle = grad;
+        roundedRect(ctx, lx0, ly0, legendW, legendH, 4);
+        ctx.fill();
+        ctx.fillStyle = '#e2e8f0';
+        ctx.font = 'bold 9px ui-monospace, monospace';
+        ctx.fillText('Δ CHANGE INTENSITY  •  low → high', lx0, ly0 + 18);
+        ctx.restore();
+
+        ctx.fillStyle = 'rgba(2, 6, 23, 0.82)';
+        ctx.fillRect(width - 212, height - 26, 202, 20);
+        ctx.fillStyle = '#7dd3fc';
         ctx.font = 'bold 9px monospace';
-        ctx.fillText('SatQuery AI • Bounding-Box Change Evidence', width - 205, height - 12);
+        ctx.fillText('SatQuery AI · Heatmap + Bounding-Box Evidence', width - 207, height - 12);
 
         const evidenceUrl = canvas.toDataURL('image/jpeg', 0.9);
         const changedKm2 = Number(((changeRatio * 32.5) || 4.2).toFixed(2));

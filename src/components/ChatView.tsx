@@ -19,6 +19,7 @@ import { analyzeScene } from '../utils/sceneAnalysis';
 import { boostScene, boostChange, shouldBoost } from '../lib/gemini';
 import SwipeCompare from './SwipeCompare';
 import SceneResultCard from './SceneResultCard';
+import ChangeEvidenceView from './ChangeEvidenceView';
 
 export interface ChatViewProps {
   settings: SatQuerySettings;
@@ -373,15 +374,7 @@ const ChatView: React.FC<ChatViewProps> = ({ settings, onInspect, onAddRecent, i
 
                 {msg.analysis && (
                   <div className="mt-3 rounded-2xl bg-white/70 p-2.5 ring-1 ring-slate-200/80">
-                    {msg.analysis.changeMask &&
-                      !msg.analysis.changeMask.startsWith('linear-gradient') && (
-                        <figure className="relative overflow-hidden rounded-xl ring-1 ring-red-400/40">
-                          <img src={msg.analysis.changeMask} alt="Boxed change evidence on T2" className="w-full object-cover" />
-                          <figcaption className="absolute bottom-2 left-2 flex items-center gap-1.5 rounded-lg bg-slate-950/80 px-2 py-1 text-[10px] font-bold text-red-300">
-                            <ScanEye className="h-3 w-3" /> Red boxes = detected change zones on T2
-                          </figcaption>
-                        </figure>
-                      )}
+                    <ChangeEvidenceView t1={msg.analysis.t1Image} t2={msg.analysis.t2Image} />
                     <SwipeCompare t1={msg.analysis.t1Image} t2={msg.analysis.t2Image} className="mt-2 w-full" />
                     <div className="mt-2 flex flex-wrap items-center justify-between gap-2 px-1">
                       <p className="flex items-center gap-1.5 text-[11px] font-bold text-emerald-600">
