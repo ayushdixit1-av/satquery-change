@@ -59,6 +59,133 @@ function fallback(imageUrl: string, fileName: string): SceneResult {
   };
 }
 
+/** Pure per-pixel classification + description assembly. Testable without a DOM. */
+export function classifySceneData(
+  imageUrl: string,
+  fileName: string,
+  data: Uint8ClampedArray,
+  width: number,
+  height: number,
+): SceneResult {
+  const counts: Record<string, number> = {};
+  let total = 0;
+  let luminanceSum = 0;
+  let vegGreennessSum = 0;
+  let vegPixels = 0;
+  let waterPixels = 0;
+  let urbanPixels = 0;
+  let cloudPixels = 0;
+  let edgePairs = 0;
+  let edgeHits = 0;
+
+  for (let y = 0; y < height; y++) {
+    for (let x = 0; x < width; x++) {
+      const i = (y * width + x) * 4;
+      const r = data[i];
+      const g = data[i + 1];
+      const b = data[i + 2];
+      const l = 0.299 * r + 0.587 * g + 0.114 * b;
+      luminanceSum += l;
+
+      const mx = Math.max(r, g, b);
+      const mn = Math.min(r, g, b);
+      const chroma = mx - mn;
+      const sat = mx === 0 ? 0 : chroma / mx;
+
+      let label: string;
+      if (l > 225 && sat < 0.12) {
+        label = 'Cloud';
+        cloudPixels++;
+      } else if (l < 40) {
+        label = 'Shadow';
+      } else if (b > r && b >= g && l < 150 && sat < 0.85) {
+        label = 'Water';
+        waterPixels++;
+      } else if (g > r && g >= b && g - r > 10 && sat > 0.14) {
+        label = 'Vegetation';
+        vegPixels++;
+        vegGreennessSum += (g - r) / (g + r + 1);
+      } else if (r >= g && g >= b && chroma > 8 && sat < 0.45 && l > 70 && l < 235) {
+        label = 'Bare';
+      } else {
+        label = 'Built-up';
+        urbanPixels++;
+      }
+
+      counts[label] = (counts[label] ?? 0) + 1;
+      total++;
+
+      if (x < width - 1) {
+        const nxt = (y * width + x + 1) * 4;
+        const ln = 0.299 * data[nxt] + 0.587 * data[nxt + 1] + 0.114 * data[nxt + 2];
+        edgePairs++;
+        if (Math.abs(ln - l) > 30) edgeHits++;
+      }
+    }
+  }
+
+  const brightness = luminanceSum / Math.max(1, total) / 255;
+  const detail = edgePairs ? edgeHits / edgePairs : 0;
+  const vegetationHealth = vegPixels ? vegGreennessSum / vegPixels : 0;
+
+  const classes = Object.entries(counts)
+    .map(([label, n]) => ({ label, pct: (n / total) * 100, color: CLASS_COLORS[label] ?? CLASS_COLORS.Other }))
+    .sort((a, b) => b.pct - a.pct);
+
+  const totalClassified = Math.max(1, vegPixels + waterPixels + urbanPixels + cloudPixels);
+  const waterPct = (waterPixels / totalClassified) * 100;
+  const urbanPct = (urbanPixels / totalClassified) * 100;
+  const cloudPct = (cloudPixels / totalClassified) * 100;
+
+  const dominant = classes[0]?.label ?? 'Other';
+  const words = hsWords(brightness);
+
+  const parts: string[] = [];
+  parts.push(
+    `Scene analysis of "${fileName}". The frame is dominated by ${dominant.toLowerCase()} cover at ${classes[0]?.pct.toFixed(0)}%, ${words.brightness} with ${words.texture}.`,
+  );
+
+  const veg = classes.find((c) => c.label === 'Vegetation')?.pct ?? 0;
+  if (veg > 8) {
+    parts.push(
+      `Vegetation spans ${veg.toFixed(0)}% of the scene and its health is ${words.health} (average greenness index ${vegetationHealth.toFixed(2)}).`,
+    );
+  }
+  if (waterPct > 4) {
+    parts.push(`Open water bodies cover ${waterPct.toFixed(0)}% of the frame.`);
+  }
+  if (urbanPct > 4) {
+    parts.push(
+      `Built-up or exposed surfaces account for ${urbanPct.toFixed(0)}% of the scene${
+        detail > 0.3 ? ' — the strong edge density suggests structures, roads or dense development' : ' — mostly even, low-relief ground'
+      }.`,
+    );
+  }
+  if (cloudPct > 10) {
+    parts.push(`About ${cloudPct.toFixed(0)}% of the frame is cloud-covered and may hide ground detail below.`);
+  }
+  const shadow = classes.find((c) => c.label === 'Shadow')?.pct ?? 0;
+  if (shadow > 8) {
+    parts.push(`Deep shadow accounts for ${shadow.toFixed(0)}% of the scene.`);
+  }
+
+  parts.push(`Overall brightness ${(brightness * 100).toFixed(0)}%, structural detail ${(detail * 100).toFixed(0)}%.`);
+
+  return {
+    imageUrl,
+    fileName,
+    classes,
+    dominant,
+    vegetationHealth,
+    waterPct,
+    urbanPct,
+    brightness,
+    detail,
+    cloudPct,
+    description: parts.join('\n'),
+  };
+}
+
 export async function analyzeScene(imageUrl: string, fileName = 'scene.jpg'): Promise<SceneResult> {
   const img = new Image();
   img.crossOrigin = 'anonymous';
@@ -82,129 +209,7 @@ export async function analyzeScene(imageUrl: string, fileName = 'scene.jpg'): Pr
     ctx.drawImage(img, 0, 0, width, height);
     const data = ctx.getImageData(0, 0, width, height).data;
 
-    const counts: Record<string, number> = {};
-    let total = 0;
-    let luminanceSum = 0;
-    let vegGreennessSum = 0;
-    let vegPixels = 0;
-    let waterPixels = 0;
-    let urbanPixels = 0;
-    let cloudPixels = 0;
-    let edgePairs = 0;
-    let edgeHits = 0;
-
-    for (let y = 0; y < height; y++) {
-      for (let x = 0; x < width; x++) {
-        const i = (y * width + x) * 4;
-        const r = data[i];
-        const g = data[i + 1];
-        const b = data[i + 2];
-        const l = 0.299 * r + 0.587 * g + 0.114 * b;
-        luminanceSum += l;
-
-        const mx = Math.max(r, g, b);
-        const mn = Math.min(r, g, b);
-        const chroma = mx - mn;
-        const sat = mx === 0 ? 0 : chroma / mx;
-
-        let label = 'Built-up';
-        if (l > 225 && sat < 0.12) {
-          label = 'Cloud';
-          cloudPixels++;
-        } else if (l < 40) {
-          label = 'Shadow';
-        } else if (b > r && b >= g && l < 120 && sat < 0.5) {
-          label = 'Water';
-          waterPixels++;
-        } else if (g > r && g >= b && g - r > 10 && sat > 0.14) {
-          label = 'Vegetation';
-          vegPixels++;
-          vegGreennessSum += (g - r) / (g + r + 1);
-        } else if (r > g && chroma < 26 && l > 80 && l < 215) {
-          label = 'Bare';
-        } else if (sat < 0.08 && l >= 40 && l <= 225) {
-          label = 'Built-up';
-          urbanPixels++;
-        } else {
-          label = 'Built-up';
-          urbanPixels++;
-        }
-
-        counts[label] = (counts[label] ?? 0) + 1;
-        total++;
-
-        // Edge/texture: luminance jump to the right neighbour
-        if (x < width - 1) {
-          const nxt = (y * width + x + 1) * 4;
-          const ln = 0.299 * data[nxt] + 0.587 * data[nxt + 1] + 0.114 * data[nxt + 2];
-          edgePairs++;
-          if (Math.abs(ln - l) > 30) edgeHits++;
-        }
-      }
-    }
-
-    const brightness = luminanceSum / Math.max(1, total) / 255;
-    const detail = edgePairs ? edgeHits / edgePairs : 0;
-    const vegetationHealth = vegPixels ? vegGreennessSum / vegPixels : 0;
-
-    const classes = Object.entries(counts)
-      .map(([label, n]) => ({ label, pct: (n / total) * 100, color: CLASS_COLORS[label] ?? CLASS_COLORS.Other }))
-      .sort((a, b) => b.pct - a.pct);
-
-    const totalClassified = Math.max(1, vegPixels + waterPixels + urbanPixels + cloudPixels);
-    const waterPct = (waterPixels / totalClassified) * 100;
-    const urbanPct = (urbanPixels / totalClassified) * 100;
-    const cloudPct = (cloudPixels / totalClassified) * 100;
-
-    const dominant = classes[0]?.label ?? 'Other';
-    const words = hsWords(brightness);
-
-    const parts: string[] = [];
-    parts.push(
-      `Scene analysis of "${fileName}". The frame is dominated by ${dominant.toLowerCase()} cover at ${classes[0]?.pct.toFixed(0)}%, ${words.brightness} with ${words.texture}.`,
-    );
-
-    const veg = classes.find((c) => c.label === 'Vegetation')?.pct ?? 0;
-    if (veg > 8) {
-      parts.push(
-        `Vegetation spans ${veg.toFixed(0)}% of the scene and its health is ${words.health} (average greenness index ${vegetationHealth.toFixed(2)}).`,
-      );
-    }
-    if (waterPct > 4) {
-      parts.push(`Open water bodies cover ${waterPct.toFixed(0)}% of the frame.`);
-    }
-    if (urbanPct > 4) {
-      parts.push(
-        `Built-up or exposed surfaces account for ${urbanPct.toFixed(0)}% of the scene${
-          detail > 0.3 ? ' — the strong edge density suggests structures, roads or dense development' : ' — mostly even, low-relief ground'
-        }.`,
-      );
-    }
-    if (cloudPct > 10) {
-      parts.push(`About ${cloudPct.toFixed(0)}% of the frame is cloud-covered and may hide ground detail below.`);
-    }
-    const shadow = classes.find((c) => c.label === 'Shadow')?.pct ?? 0;
-    if (shadow > 8) {
-      parts.push(`Deep shadow accounts for ${shadow.toFixed(0)}% of the scene.`);
-    }
-
-    parts.push(
-      `Overall brightness ${(brightness * 100).toFixed(0)}%, structural detail ${(detail * 100).toFixed(0)}%.`,
-    );
-
-    return {
-      imageUrl,
-      fileName,
-      classes,
-      dominant,
-      vegetationHealth,
-      waterPct,
-      urbanPct,
-      brightness,
-      detail,
-      cloudPct,
-      description: parts.join('\n'),
-    };
+    return classifySceneData(imageUrl, fileName, data, width, height);
   } catch {
     return fallback(imageUrl, fileName);
   }
