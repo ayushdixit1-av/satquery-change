@@ -166,7 +166,9 @@ const SettingsView: React.FC<SettingsViewProps> = ({ settings, onChange }) => {
                   className="glass-input mt-1.5 w-full rounded-xl px-3 py-2 text-xs font-medium outline-none"
                 />
                 <p className="mt-1.5 flex items-center gap-1 text-[10px] font-semibold text-slate-400">
-                  <KeyRound className="h-3 w-3" /> Stored in your browser only — never committed to the repo or the public site.
+                  <KeyRound className="h-3 w-3" /> Optional when a Live model API backend is set — the server reads{' '}
+                  <code className="rounded bg-slate-100 px-1">GEMINI_API_KEY</code> from its environment / .env. Without a
+                  backend, the key is used directly from this browser and saved only here (never in the repo).
                 </p>
               </div>
 

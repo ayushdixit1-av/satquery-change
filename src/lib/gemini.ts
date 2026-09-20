@@ -12,7 +12,7 @@
  *    told to describe only that — no inventing.
  */
 
-import type { AnalysisItem } from '../types';
+import type { AnalysisItem, SatQuerySettings } from '../types';
 
 export interface BoostSettings {
   key: string;
@@ -219,22 +219,73 @@ const SCHEMA = {
   required: ['summary'],
 };
 
+interface BoostPayload {
+  kind: 'scene' | 'change';
+  query: string;
+  model: string;
+  image: { mime_type: string; data: string };
+  evidence: Record<string, unknown>;
+}
+
+/** Route through the live backend (/boost) so the API key stays server-side. */
+async function callBackendBoost(baseUrl: string, payload: BoostPayload): Promise<BoostResult> {
+  try {
+    const res = await fetch(`${baseUrl.replace(/\/$/, '')}/boost`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+      signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS + 10_000),
+    });
+    if (!res.ok) return { ok: false, error: `http-${res.status}` };
+    const data = (await res.json()) as { summary?: string; error?: string };
+    if (!data.summary) return { ok: false, error: data.error ?? 'empty' };
+    return { ok: true, text: data.summary };
+  } catch {
+    return { ok: false, error: 'net' };
+  }
+}
+
 export async function boostScene(
-  settings: BoostSettings,
+  settings: SatQuerySettings,
   scene: { imageUrl: string; fileName: string; classes: { label: string; pct: number }[]; vegetationHealth: number; waterPct: number; urbanPct: number; brightness: number; detail: number; cloudPct: number },
   query: string,
 ): Promise<BoostResult> {
-  if (!geminiReady(settings)) return { ok: false, error: 'gemini-off' };
-  if (!consumeBudget(settings.dailyCap)) return { ok: false, error: 'budget' };
+  if (settings.geminiMode === 'off') return { ok: false, error: 'gemini-off' };
+  const viaBackend = settings.apiMode === 'live' && settings.apiUrl.trim() !== '';
+  if (!settings.geminiKey && !viaBackend) return { ok: false, error: 'gemini-off' };
 
-  const key = cacheKey(scene.imageUrl, `scene:${query}`, settings.model);
+  const key = cacheKey(scene.imageUrl, `scene:${query}${viaBackend ? '(be)' : ''}`, settings.geminiModel);
   const cached = cacheGet(key);
   if (cached) return { ok: true, text: cached, fromCache: true };
+
+  if (!consumeBudget(settings.geminiDailyCap)) return { ok: false, error: 'budget' };
 
   try {
     const image = await toSmallJpeg(scene.imageUrl);
     if (!image) return { ok: false, error: 'img' };
     const evidence = scene.classes.map((c) => `${c.label} ${c.pct.toFixed(1)}%`).join(', ');
+
+    if (viaBackend) {
+      const r = await callBackendBoost(settings.apiUrl, {
+        kind: 'scene',
+        query,
+        model: settings.geminiModel,
+        image: { mime_type: image.mime, data: image.b64 },
+        evidence: {
+          classes: scene.classes,
+          vegetationHealth: scene.vegetationHealth,
+          waterPct: scene.waterPct,
+          urbanPct: scene.urbanPct,
+          brightness: scene.brightness,
+          detail: scene.detail,
+          cloudPct: scene.cloudPct,
+          fileName: scene.fileName,
+        },
+      });
+      if (r.ok && r.text) cacheSet(key, r.text);
+      return r;
+    }
+
     const prompt =
       `You are a remote-sensing analyst. A device already measured your reference image on-device. ` +
       `Here is the measured evidence — DO NOT contradict it and DO NOT invent facts beyond it: ` +
@@ -245,7 +296,7 @@ export async function boostScene(
       `answer the question "${query}" by describing the scene in 3-6 vivid but strictly evidence-based sentences. ` +
       `Return JSON with a single field "summary".`;
 
-    const raw = await callGemini(settings.key, settings.model, [{ text: prompt }, { inlineData: { mimeType: image.mime, data: image.b64 } }], SCHEMA);
+    const raw = await callGemini(settings.geminiKey, settings.geminiModel, [{ text: prompt }, { inlineData: { mimeType: image.mime, data: image.b64 } }], SCHEMA);
     const text = extractSummary(raw ?? '');
     if (!text) return { ok: false, error: 'empty' };
     cacheSet(key, text);
@@ -256,23 +307,48 @@ export async function boostScene(
 }
 
 export async function boostChange(
-  settings: BoostSettings,
+  settings: SatQuerySettings,
   analysis: Pick<AnalysisItem, 't1Image' | 't2Image' | 'metrics'>,
   evidenceImageUrl: string,
   query: string,
 ): Promise<BoostResult> {
-  if (!geminiReady(settings)) return { ok: false, error: 'gemini-off' };
-  if (!consumeBudget(settings.dailyCap)) return { ok: false, error: 'budget' };
+  if (settings.geminiMode === 'off') return { ok: false, error: 'gemini-off' };
+  const viaBackend = settings.apiMode === 'live' && settings.apiUrl.trim() !== '';
+  if (!settings.geminiKey && !viaBackend) return { ok: false, error: 'gemini-off' };
 
   const a = analysis;
-  const key = cacheKey(`${a.t1Image}|${a.t2Image}`, `change:${query}`, settings.model);
+  const key = cacheKey(`${a.t1Image}|${a.t2Image}`, `change:${query}${viaBackend ? '(be)' : ''}`, settings.geminiModel);
   const cached = cacheGet(key);
   if (cached) return { ok: true, text: cached, fromCache: true };
+
+  if (!consumeBudget(settings.geminiDailyCap)) return { ok: false, error: 'budget' };
 
   try {
     const image = await toSmallJpeg(evidenceImageUrl);
     if (!image) return { ok: false, error: 'img' };
     const m = a.metrics;
+
+    if (viaBackend) {
+      const r = await callBackendBoost(settings.apiUrl, {
+        kind: 'change',
+        query,
+        model: settings.geminiModel,
+        image: { mime_type: image.mime, data: image.b64 },
+        evidence: {
+          metrics: {
+            changedAreaKm2: m.changedAreaKm2,
+            changedAreaPct: m.changedAreaPct,
+            precision: m.precision,
+            recall: m.recall,
+            f1: m.f1,
+            iou: m.iou,
+          },
+        },
+      });
+      if (r.ok && r.text) cacheSet(key, r.text);
+      return r;
+    }
+
     const prompt =
       `You are a remote-sensing change-detection analyst. A device already measured this T1/T2 pair. ` +
       `The composite image shows T2 with red numbered boxes around detected change zones. ` +
@@ -282,7 +358,7 @@ export async function boostChange(
       `question "${query}", explain in 4-7 sentences WHAT changed in each visible zone and the overall picture. ` +
       `Describe only what the boxes/evidence support. Return JSON with a single field "summary".`;
 
-    const raw = await callGemini(settings.key, settings.model, [{ text: prompt }, { inlineData: { mimeType: image.mime, data: image.b64 } }], SCHEMA);
+    const raw = await callGemini(settings.geminiKey, settings.geminiModel, [{ text: prompt }, { inlineData: { mimeType: image.mime, data: image.b64 } }], SCHEMA);
     const text = extractSummary(raw ?? '');
     if (!text) return { ok: false, error: 'empty' };
     cacheSet(key, text);

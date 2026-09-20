@@ -272,7 +272,7 @@ const ChatView: React.FC<ChatViewProps> = ({ settings, onInspect, onAddRecent, i
               <p className="text-sm font-extrabold tracking-tight text-slate-900">SatQuery Geospatial Assistant</p>
               <p className="text-[10px] font-semibold text-slate-500">
                 {settings.apiMode === 'live' && settings.apiUrl ? 'Live model endpoint' : 'On-device engine'} ·{' '}
-                {settings.geminiKey ? 'Gemini boost ready' : 'private & offline'}
+                {settings.geminiKey || (settings.apiMode === 'live' && settings.apiUrl) ? 'Gemini boost ready' : 'private & offline'}
               </p>
             </div>
           </div>

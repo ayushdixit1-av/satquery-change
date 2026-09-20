@@ -8,6 +8,9 @@ venv/
 dist/
 build/
 
+# Secrets — never commit the Gemini key
+.env
+
 # Model checkpoint (too large for git; uploaded separately if needed)
 *.pth
 
