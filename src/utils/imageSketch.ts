@@ -3,6 +3,99 @@
  * with contour boundaries, delta highlights, and feature masks.
  */
 
+interface ChangeBox {
+  x: number;
+  y: number;
+  w: number;
+  h: number;
+  ratio: number;
+}
+
+function computeChangeBoxes(
+  width: number,
+  height: number,
+  cols: number,
+  rows: number,
+  cellW: number,
+  cellH: number,
+  changed: Uint8Array,
+): ChangeBox[] {
+  const boxes: ChangeBox[] = [];
+  const visited = new Uint8Array(cols * rows);
+  const stack: number[] = [];
+
+  for (let cy = 0; cy < rows; cy++) {
+    for (let cx = 0; cx < cols; cx++) {
+      const idx = cy * cols + cx;
+      if (changed[idx] === 0 || visited[idx]) continue;
+
+      visited[idx] = 1;
+      stack.push(idx);
+      let minX = cx;
+      let maxX = cx;
+      let minY = cy;
+      let maxY = cy;
+      let cells = 0;
+
+      while (stack.length) {
+        const cur = stack.pop()!;
+        const ccx = cur % cols;
+        const ccy = (cur - ccx) / cols;
+        cells++;
+        minX = Math.min(minX, ccx);
+        maxX = Math.max(maxX, ccx);
+        minY = Math.min(minY, ccy);
+        maxY = Math.max(maxY, ccy);
+
+        const nb = [cur - 1, cur + 1, cur - cols, cur + cols];
+        for (const n of nb) {
+          const nx = n % cols;
+          const ny = (n - nx) / cols;
+          if (nx < 0 || nx >= cols || ny < 0 || ny >= rows) continue;
+          if (visited[n] || changed[n] === 0) continue;
+          visited[n] = 1;
+          stack.push(n);
+        }
+      }
+
+      if (cells < 3) continue;
+
+      let x = minX * cellW - 4;
+      let y = minY * cellH - 4;
+      let w = (maxX - minX + 1) * cellW + 8;
+      let h = (maxY - minY + 1) * cellH + 8;
+      x = Math.max(0, x);
+      y = Math.max(0, y);
+      w = Math.min(width - x, w);
+      h = Math.min(height - y, h);
+      if (w < 10 || h < 10) continue;
+
+      let changedPixels = 0;
+      let totalPixels = 0;
+      for (let py = Math.round(y); py < Math.round(y + h); py++) {
+        for (let px = Math.round(x); px < Math.round(x + w); px++) {
+          const ci = Math.min(cols - 1, Math.floor(px / cellW));
+          const cj = Math.min(rows - 1, Math.floor(py / cellH));
+          totalPixels++;
+          if (changed[cj * cols + ci]) changedPixels++;
+        }
+      }
+
+      boxes.push({
+        x: Math.round(x),
+        y: Math.round(y),
+        w: Math.round(w),
+        h: Math.round(h),
+        ratio: totalPixels ? changedPixels / totalPixels : 0,
+      });
+    }
+  }
+
+  // Larger boxes behind, so smaller (denser) ones stay readable on top
+  boxes.sort((a, b) => b.w * b.h - a.w * a.h);
+  return boxes;
+}
+
 export async function generateSketchedEvidence(
   t1Url: string,
   t2Url: string
@@ -44,6 +137,7 @@ export async function generateSketchedEvidence(
         const ctx2 = c2.getContext('2d');
 
         let changeRatio = 0.12;
+        let changeBoxes: ChangeBox[] = [];
 
         if (ctx1 && ctx2) {
           ctx1.drawImage(img1, 0, 0, width, height);
@@ -85,79 +179,85 @@ export async function generateSketchedEvidence(
             // Overlay the neon difference mask on T2
             ctx.drawImage(maskCanvas, 0, 0);
             changeRatio = diffPixels / totalPixels;
+
+            // Downsample the change mask to a coarse grid so we can find
+            // the tightest rectangle zones around where change actually happened.
+            const cols = Math.min(72, Math.max(20, Math.ceil(width / 14)));
+            const rows = Math.min(72, Math.max(20, Math.ceil(height / 14)));
+            const cellW = width / cols;
+            const cellH = height / rows;
+            const grid = document.createElement('canvas');
+            grid.width = cols;
+            grid.height = rows;
+            const gctx = grid.getContext('2d');
+            if (gctx) {
+              gctx.drawImage(maskCanvas, 0, 0, cols, rows);
+              const gdata = gctx.getImageData(0, 0, cols, rows).data;
+              const cellChanged = new Uint8Array(cols * rows);
+              for (let i = 0; i < cols * rows; i++) {
+                if (gdata[i * 4 + 3] > 32) cellChanged[i] = 1;
+              }
+              changeBoxes = computeChangeBoxes(width, height, cols, rows, cellW, cellH, cellChanged);
+            }
           }
         }
 
-        // 3. Draw high-visibility sketched vector contours and bounding boxes
-        ctx.strokeStyle = '#ef4444'; // Red-600 neon contour
-        ctx.lineWidth = Math.max(2, Math.round(width / 250));
+        // 3. Rectangle boxes around the pixels that actually changed
+        ctx.strokeStyle = '#ef4444'; // Red-600 neon box border
+        ctx.lineWidth = Math.max(2, Math.round(width / 240));
         ctx.shadowColor = 'rgba(239, 68, 68, 0.8)';
-        ctx.shadowBlur = 8;
+        ctx.shadowBlur = 10;
 
-        // Draw multiple contour clusters around centers of interest
-        const clusters = [
-          { cx: width * 0.35, cy: height * 0.42, r: width * 0.16, label: 'AOI-1 [Urban Delta]' },
-          { cx: width * 0.68, cy: height * 0.58, r: width * 0.13, label: 'AOI-2 [Canopy Shift]' },
-        ];
+        changeBoxes.forEach((b, i) => {
+          // Translucent fill keeps the changed imagery visible under the box
+          ctx.fillStyle = 'rgba(239, 68, 68, 0.14)';
+          ctx.fillRect(b.x, b.y, b.w, b.h);
 
-        clusters.forEach((c) => {
-          ctx.beginPath();
-          // Draw organic sketched polygon contour
-          const points = 12;
-          for (let p = 0; p <= points; p++) {
-            const angle = (p / points) * Math.PI * 2;
-            const variance = 0.82 + Math.sin(angle * 3) * 0.18;
-            const px = c.cx + Math.cos(angle) * (c.r * variance);
-            const py = c.cy + Math.sin(angle) * (c.r * 0.85 * variance);
-            if (p === 0) ctx.moveTo(px, py);
-            else ctx.lineTo(px, py);
-          }
-          ctx.closePath();
-          ctx.stroke();
+          // Hard rectangle outline around the change region
+          ctx.strokeRect(b.x, b.y, b.w, b.h);
 
-          // Sketched target boundary box
-          ctx.strokeStyle = 'rgba(249, 115, 22, 0.9)'; // Orange
-          ctx.lineWidth = 1.5;
-          ctx.shadowBlur = 4;
-          const boxPad = c.r * 0.95;
-          const bx = c.cx - boxPad;
-          const by = c.cy - boxPad * 0.8;
-          const bw = boxPad * 2;
-          const bh = boxPad * 1.6;
-
-          // Corner brackets
-          const cornerLen = 14;
+          // Amber corner accents for an annotated look
+          ctx.shadowBlur = 0;
+          ctx.strokeStyle = 'rgba(249, 115, 22, 0.95)';
+          ctx.lineWidth = 2;
+          const cl = Math.min(20, b.w / 3, b.h / 3);
           // Top-left
           ctx.beginPath();
-          ctx.moveTo(bx, by + cornerLen);
-          ctx.lineTo(bx, by);
-          ctx.lineTo(bx + cornerLen, by);
+          ctx.moveTo(b.x, b.y + cl);
+          ctx.lineTo(b.x, b.y);
+          ctx.lineTo(b.x + cl, b.y);
           ctx.stroke();
           // Top-right
           ctx.beginPath();
-          ctx.moveTo(bx + bw - cornerLen, by);
-          ctx.lineTo(bx + bw, by);
-          ctx.lineTo(bx + bw, by + cornerLen);
+          ctx.moveTo(b.x + b.w - cl, b.y);
+          ctx.lineTo(b.x + b.w, b.y);
+          ctx.lineTo(b.x + b.w, b.y + cl);
           ctx.stroke();
           // Bottom-left
           ctx.beginPath();
-          ctx.moveTo(bx, by + bh - cornerLen);
-          ctx.lineTo(bx, by + bh);
-          ctx.lineTo(bx + cornerLen, by + bh);
+          ctx.moveTo(b.x, b.y + b.h - cl);
+          ctx.lineTo(b.x, b.y + b.h);
+          ctx.lineTo(b.x + cl, b.y + b.h);
           ctx.stroke();
           // Bottom-right
           ctx.beginPath();
-          ctx.moveTo(bx + bw - cornerLen, by + bh);
-          ctx.lineTo(bx + bw, by + bh);
-          ctx.lineTo(bx + bw, by + bh - cornerLen);
+          ctx.moveTo(b.x + b.w - cl, b.y + b.h);
+          ctx.lineTo(b.x + b.w, b.y + b.h);
+          ctx.lineTo(b.x + b.w, b.y + b.h - cl);
           ctx.stroke();
+          ctx.shadowBlur = 10;
 
-          // Label chip
+          // Label chip above the top-left corner
+          const label = `CHG-${i + 1}  ${(b.ratio * 100).toFixed(1)}%`;
+          const lw = Math.ceil(label.length * 6) + 14;
+          const lh = 16;
+          const lx = b.x;
+          const ly = Math.max(0, b.y - lh - 3);
           ctx.fillStyle = 'rgba(15, 23, 42, 0.85)';
-          ctx.fillRect(bx, by - 18, 120, 16);
+          ctx.fillRect(lx, ly, lw, lh);
           ctx.fillStyle = '#f87171';
-          ctx.font = 'bold 10px monospace';
-          ctx.fillText(c.label, bx + 4, by - 6);
+          ctx.font = 'bold 11px monospace';
+          ctx.fillText(label, lx + 7, ly + 12);
         });
 
         // Watermark stamp in corner
