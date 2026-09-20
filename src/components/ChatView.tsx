@@ -203,6 +203,7 @@ const ChatView: React.FC<ChatViewProps> = ({ settings, onInspect, onAddRecent, i
         customTitle: query,
         category: 'Environment',
       });
+      let backendProvidedMetrics = false;
       // 1) Live PyTorch model endpoint (optional)
       if (settings.apiMode === 'live' && settings.apiUrl.trim()) {
         try {
@@ -216,7 +217,10 @@ const ChatView: React.FC<ChatViewProps> = ({ settings, onInspect, onAddRecent, i
               metrics?: AnalysisItem['metrics'];
               evidenceUrl?: string;
             };
-            if (data.metrics) analysis.metrics = { ...analysis.metrics, ...data.metrics };
+            if (data.metrics) {
+              analysis.metrics = { ...analysis.metrics, ...data.metrics };
+              backendProvidedMetrics = true;
+            }
             if (data.summary) analysis.summary = data.summary;
             if (data.trace?.length) analysis.trace = data.trace;
             if (data.evidenceUrl) {
@@ -235,12 +239,20 @@ const ChatView: React.FC<ChatViewProps> = ({ settings, onInspect, onAddRecent, i
       analysis.thumbnail = evidence.evidenceUrl;
       analysis.metrics.changedAreaKm2 = evidence.changedKm2;
       analysis.metrics.changedAreaPct = evidence.changedPct;
+      if (!backendProvidedMetrics) {
+        analysis.metrics.precision = evidence.coverage.precision * 100;
+        analysis.metrics.recall = evidence.coverage.recall * 100;
+        analysis.metrics.f1 = evidence.coverage.f1 * 100;
+        analysis.metrics.iou = evidence.coverage.iou * 100;
+      }
       analysis.summary = describeChanges(evidence);
       analysis.trace = [
         'Imagery pair ingested (T1 baseline & T2 observation)',
         'Multi-temporal spatial registration aligned',
         'Pixel-difference mask computed on canvas',
         `${evidence.regionCount} change zone${evidence.regionCount === 1 ? '' : 's'} isolated, boxed and ranked`,
+        'Self-evaluated: zone coverage precision/recall/IoU vs the raw change mask',
+        `Spatial scale assumed at ${evidence.gsdMeters} m/pixel ground sampling for area estimates`,
         'Boxed evidence + plain-text change summary rendered on T2',
       ];
 

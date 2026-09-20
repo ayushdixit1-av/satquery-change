@@ -14,6 +14,17 @@ export interface ChangeRegion {
   changedPixels: number;
 }
 
+/** Assumed ground-sample distance when no sensor metadata is supplied (m/pixel). */
+export const GSD_METERS = 30;
+
+/** Honest self-evaluation of how well the box representation captures the change mask. */
+export interface CoverageMetrics {
+  precision: number;
+  recall: number;
+  f1: number;
+  iou: number;
+}
+
 export interface SketchEvidenceResult {
   evidenceUrl: string;
   changedKm2: number;
@@ -22,6 +33,26 @@ export interface SketchEvidenceResult {
   regions: ChangeRegion[];
   width: number;
   height: number;
+  gsdMeters: number;
+  coverage: CoverageMetrics;
+}
+
+/**
+ * Coverage metrics comparing the boxed zones against the raw change mask:
+ *  - recall = fraction of changed pixels that fall inside a zone box
+ *  - precision = fraction of zone-box area that is actually changed
+ *  - f1 / iou derived as usual (iou === P·R / (P+R−P·R)).
+ */
+export function computeCoverageMetrics(totalChanged: number, boxes: ChangeRegion[]): CoverageMetrics {
+  const overlap = boxes.reduce((s, b) => s + b.changedPixels, 0);
+  const boxArea = boxes.reduce((s, b) => s + b.w * b.h, 0);
+  const tp = Math.min(overlap, Math.max(0, totalChanged));
+  const recall = totalChanged > 0 ? tp / totalChanged : 0;
+  const precision = boxArea > 0 ? tp / boxArea : 0;
+  const f1 = precision + recall > 0 ? (2 * precision * recall) / (precision + recall) : 0;
+  const union = totalChanged + boxArea - tp;
+  const iou = union > 0 ? tp / union : 0;
+  return { precision, recall, f1, iou };
 }
 
 interface RawBox {
@@ -397,17 +428,20 @@ function locate(r: ChangeRegion, width: number, height: number): string {
 
 /** Natural-language description of the full change picture. */
 export function describeChanges(ev: SketchEvidenceResult): string {
+  const scaleNote = `assuming ${ev.gsdMeters} m/pixel ground sampling`;
   if (ev.regionCount === 0) {
     return [
       'Change scan complete — no significant pixel-level delta was found in this pair.',
-      `Net difference stayed negligible across the AOI (≈ ${ev.changedPct.toFixed(1)}%).`,
+      `Net difference stayed negligible across the AOI (≈ ${ev.changedPct.toFixed(1)}%), ${scaleNote}.`,
     ].join('\n');
   }
 
+  const c = ev.coverage;
   const head = `Change scan complete: ${ev.regionCount} distinct change zone${ev.regionCount === 1 ? '' : 's'} boxed and labeled.`;
   const lines = [
     head,
-    `Net change: ${ev.changedPct.toFixed(1)}% of the area (≈ ${ev.changedKm2.toFixed(2)} km²).`,
+    `Net change: ${ev.changedPct.toFixed(1)}% of the area (≈ ${ev.changedKm2.toFixed(2)} km², ${scaleNote}).`,
+    `Zone fidelity: boxes capture ${(c.recall * 100).toFixed(0)}% of the detected change footprint at ${(c.precision * 100).toFixed(0)}% precision.`,
   ];
 
   const totalChanged = ev.regions.reduce((s, r) => s + r.changedPixels, 0) || 1;
@@ -434,12 +468,14 @@ export async function generateSketchedEvidence(
 
     const fallback = (evidenceUrl: string, width = 512, height = 512): SketchEvidenceResult => ({
       evidenceUrl,
-      changedKm2: 4.82,
-      changedPct: 12.4,
+      changedKm2: 0,
+      changedPct: 0,
       regionCount: 0,
       regions: [],
       width,
       height,
+      gsdMeters: GSD_METERS,
+      coverage: { precision: 0, recall: 0, f1: 0, iou: 0 },
     });
 
     let loadedCount = 0;
@@ -584,8 +620,9 @@ export async function generateSketchedEvidence(
         ctx.fillText('SatQuery AI · Heatmap + Bounding-Box Evidence', width - 207, height - 12);
 
         const evidenceUrl = canvas.toDataURL('image/jpeg', 0.9);
-        const changedKm2 = Number(((changeRatio * 32.5) || 4.2).toFixed(2));
-        const changedPct = Number(((changeRatio * 100) || 12.8).toFixed(1));
+        const coverage = computeCoverageMetrics(diffPixels, changeBoxes);
+        const changedKm2 = Number((diffPixels * (GSD_METERS * GSD_METERS) / 1e6).toFixed(2));
+        const changedPct = Number((changeRatio * 100).toFixed(1));
 
         resolve({
           evidenceUrl,
@@ -595,6 +632,8 @@ export async function generateSketchedEvidence(
           regions: changeBoxes,
           width,
           height,
+          gsdMeters: GSD_METERS,
+          coverage,
         });
       } catch (e) {
         console.error('Evidence sketching error:', e);
