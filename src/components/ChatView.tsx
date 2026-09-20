@@ -3,6 +3,8 @@ import {
   Bot,
   Eraser,
   FileImage,
+  Images,
+  ScanLine,
   Send,
   Sparkles,
   ScanEye,
@@ -10,7 +12,7 @@ import {
   X,
   Satellite,
 } from 'lucide-react';
-import type { AnalysisItem, ChatMessage, SatQuerySettings } from '../types';
+import type { AnalysisItem, ChatMessage, ChatMode, SatQuerySettings } from '../types';
 import { CAPABILITY_TAGS, createAnalysisFromQuery } from '../data/mockData';
 import { generateSketchedEvidence, describeChanges } from '../utils/imageSketch';
 import { analyzeScene } from '../utils/sceneAnalysis';
@@ -22,6 +24,7 @@ export interface ChatViewProps {
   onInspect: (item: AnalysisItem) => void;
   onAddRecent: (item: AnalysisItem) => void;
   initialQuery?: string;
+  initialMode?: ChatMode;
 }
 
 interface AttachFile {
@@ -52,9 +55,10 @@ function formatBytes(bytes: number): string {
 
 const uid = () => `msg-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
 
-const ChatView: React.FC<ChatViewProps> = ({ settings, onInspect, onAddRecent, initialQuery }) => {
+const ChatView: React.FC<ChatViewProps> = ({ settings, onInspect, onAddRecent, initialQuery, initialMode }) => {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [input, setInput] = useState(initialQuery ?? '');
+  const [mode, setMode] = useState<ChatMode>(initialMode ?? 'pair');
   const [t1, setT1] = useState<AttachFile | null>(null);
   const [t2, setT2] = useState<AttachFile | null>(null);
   const [thinking, setThinking] = useState(false);
@@ -81,16 +85,29 @@ const ChatView: React.FC<ChatViewProps> = ({ settings, onInspect, onAddRecent, i
     setInput('');
   };
 
-  const run = async (rawQuery?: string) => {
+  const switchMode = (m: ChatMode) => {
+    setMode(m);
+    if (m === 'single') setT2(null);
+  };
+
+  const run = async (rawQuery?: string, forceMode?: ChatMode) => {
     const query = (rawQuery ?? input).trim();
     if (!query || thinking) return;
+    const activeMode = forceMode ?? mode;
 
     const userMsg: ChatMessage = {
       id: uid(),
       role: 'user',
       content: query,
       timestamp: new Date().toISOString(),
-      attachments: t1 || t2 ? { t1Url: t1?.url, t2Url: t2?.url, t1Name: t1?.name, t2Name: t2?.name } : undefined,
+      attachments:
+        activeMode === 'single'
+          ? t1
+            ? { t1Url: t1.url, t1Name: t1.name }
+            : undefined
+          : t1 || t2
+            ? { t1Url: t1?.url, t2Url: t2?.url, t1Name: t1?.name, t2Name: t2?.name }
+            : undefined,
     };
     setMessages((m) => [...m, userMsg]);
     setInput('');
@@ -100,79 +117,21 @@ const ChatView: React.FC<ChatViewProps> = ({ settings, onInspect, onAddRecent, i
     const t1f = t1;
     const t2f = t2;
 
+    const pushHint = (hint: string) => {
+      setMessages((m) => [
+        ...m,
+        { id: uid(), role: 'assistant', content: hint, timestamp: new Date().toISOString() },
+      ]);
+    };
+
     try {
-      const pair = t1f && t2f;
-
-      if (pair) {
-        const analysis = createAnalysisFromQuery(query, {
-          t1Url: t1f.url,
-          t2Url: t2f.url,
-          customTitle: query,
-          category: 'Environment',
-        });
-        // 1) Live PyTorch model endpoint (optional)
-        if (settings.apiMode === 'live' && settings.apiUrl.trim()) {
-          try {
-            const res = await fetch(`${settings.apiUrl.replace(/\/$/, '')}/analyze`, {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({ query, t1: t1f.url, t2: t2f.url }),
-            });
-            if (res.ok) {
-              const data = (await res.json()) as Partial<AnalysisItem> & {
-                metrics?: AnalysisItem['metrics'];
-                evidenceUrl?: string;
-              };
-              if (data.metrics) analysis.metrics = { ...analysis.metrics, ...data.metrics };
-              if (data.summary) analysis.summary = data.summary;
-              if (data.trace?.length) analysis.trace = data.trace;
-              if (data.evidenceUrl) {
-                analysis.changeMask = data.evidenceUrl;
-                analysis.thumbnail = data.evidenceUrl;
-              }
-              analysis.trace = ['Live model endpoint responded', ...(analysis.trace ?? [])];
-            }
-          } catch {
-            analysis.trace = ['Live endpoint unreachable — fell back to on-device engine', ...(analysis.trace ?? [])];
-          }
+      if (activeMode === 'single') {
+        if (!t1f) {
+          pushHint('Attach one image first — use the Image button above, then ask again.');
+          return;
         }
-        // 2) Client-side evidence synthesis: pixel mask + change zone boxes (always)
-        const evidence = await generateSketchedEvidence(t1f.url, t2f.url);
-        analysis.changeMask = evidence.evidenceUrl;
-        analysis.thumbnail = evidence.evidenceUrl;
-        analysis.metrics.changedAreaKm2 = evidence.changedKm2;
-        analysis.metrics.changedAreaPct = evidence.changedPct;
-        analysis.summary = describeChanges(evidence);
-        analysis.trace = [
-          'Imagery pair ingested (T1 baseline & T2 observation)',
-          'Multi-temporal spatial registration aligned',
-          'Pixel-difference mask computed on canvas',
-          `${evidence.regionCount} change zone${evidence.regionCount === 1 ? '' : 's'} isolated, boxed and ranked`,
-          'Boxed evidence + plain-text change summary rendered on T2',
-        ];
-        onAddRecent(analysis);
-
-        setMessages((m) => [
-          ...m,
-          {
-            id: uid(),
-            role: 'assistant',
-            content:
-              analysis.summary +
-              '\n\nReady metrics: ' +
-              `Precision ${analysis.metrics.precision.toFixed(1)}, ` +
-              `Recall ${analysis.metrics.recall.toFixed(1)}, ` +
-              `F1 ${analysis.metrics.f1.toFixed(1)}, IoU ${analysis.metrics.iou.toFixed(1)}.`,
-            timestamp: new Date().toISOString(),
-            analysis,
-            attachments: { t1Url: t1f.url, t2Url: t2f.url, t1Name: t1f.name, t2Name: t2f.name },
-          },
-        ]);
-      } else if (t1f || t2f) {
-        // Single-image scene analysis
         setAnalyzingScene(true);
-        const single = t1f ?? (t2f as AttachFile);
-        const scene = await analyzeScene(single.url, single.name);
+        const scene = await analyzeScene(t1f.url, t1f.name);
         setMessages((m) => [
           ...m,
           {
@@ -181,21 +140,81 @@ const ChatView: React.FC<ChatViewProps> = ({ settings, onInspect, onAddRecent, i
             content: scene.description,
             timestamp: new Date().toISOString(),
             scene,
-            attachments: { t1Url: single.url, t1Name: single.name },
+            attachments: { t1Url: t1f.url, t1Name: t1f.name },
           },
         ]);
-      } else {
-        const analysis = createAnalysisFromQuery(query);
-        setMessages((m) => [
-          ...m,
-          {
-            id: uid(),
-            role: 'assistant',
-            content: analysis.summary,
-            timestamp: new Date().toISOString(),
-          },
-        ]);
+        return;
       }
+
+      if (!t1f || !t2f) {
+        pushHint('Attach both images (T1 baseline and T2 observation), then ask again.');
+        return;
+      }
+
+      const analysis = createAnalysisFromQuery(query, {
+        t1Url: t1f.url,
+        t2Url: t2f.url,
+        customTitle: query,
+        category: 'Environment',
+      });
+      // 1) Live PyTorch model endpoint (optional)
+      if (settings.apiMode === 'live' && settings.apiUrl.trim()) {
+        try {
+          const res = await fetch(`${settings.apiUrl.replace(/\/$/, '')}/analyze`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ query, t1: t1f.url, t2: t2f.url }),
+          });
+          if (res.ok) {
+            const data = (await res.json()) as Partial<AnalysisItem> & {
+              metrics?: AnalysisItem['metrics'];
+              evidenceUrl?: string;
+            };
+            if (data.metrics) analysis.metrics = { ...analysis.metrics, ...data.metrics };
+            if (data.summary) analysis.summary = data.summary;
+            if (data.trace?.length) analysis.trace = data.trace;
+            if (data.evidenceUrl) {
+              analysis.changeMask = data.evidenceUrl;
+              analysis.thumbnail = data.evidenceUrl;
+            }
+            analysis.trace = ['Live model endpoint responded', ...(analysis.trace ?? [])];
+          }
+        } catch {
+          analysis.trace = ['Live endpoint unreachable — fell back to on-device engine', ...(analysis.trace ?? [])];
+        }
+      }
+      // 2) Client-side evidence synthesis: pixel mask + change zone boxes (always)
+      const evidence = await generateSketchedEvidence(t1f.url, t2f.url);
+      analysis.changeMask = evidence.evidenceUrl;
+      analysis.thumbnail = evidence.evidenceUrl;
+      analysis.metrics.changedAreaKm2 = evidence.changedKm2;
+      analysis.metrics.changedAreaPct = evidence.changedPct;
+      analysis.summary = describeChanges(evidence);
+      analysis.trace = [
+        'Imagery pair ingested (T1 baseline & T2 observation)',
+        'Multi-temporal spatial registration aligned',
+        'Pixel-difference mask computed on canvas',
+        `${evidence.regionCount} change zone${evidence.regionCount === 1 ? '' : 's'} isolated, boxed and ranked`,
+        'Boxed evidence + plain-text change summary rendered on T2',
+      ];
+      onAddRecent(analysis);
+
+      setMessages((m) => [
+        ...m,
+        {
+          id: uid(),
+          role: 'assistant',
+          content:
+            analysis.summary +
+            '\n\nReady metrics: ' +
+            `Precision ${analysis.metrics.precision.toFixed(1)}, ` +
+            `Recall ${analysis.metrics.recall.toFixed(1)}, ` +
+            `F1 ${analysis.metrics.f1.toFixed(1)}, IoU ${analysis.metrics.iou.toFixed(1)}.`,
+          timestamp: new Date().toISOString(),
+          analysis,
+          attachments: { t1Url: t1f.url, t2Url: t2f.url, t1Name: t1f.name, t2Name: t2f.name },
+        },
+      ]);
     } catch (e) {
       console.error(e);
       setMessages((m) => [
@@ -251,7 +270,7 @@ const ChatView: React.FC<ChatViewProps> = ({ settings, onInspect, onAddRecent, i
                 Ask a satellite anything about the surface of the Earth
               </p>
               <p className="mt-1 text-xs font-medium text-slate-500">
-                Attach one image to analyze the scene in detail, or attach two (T1 &#38; T2) to measure what changed between them.
+                Pick a mode below — one image for a full scene read, or two images to measure what changed between them.
               </p>
             </div>
           )}
@@ -322,6 +341,31 @@ const ChatView: React.FC<ChatViewProps> = ({ settings, onInspect, onAddRecent, i
 
         {/* Composer */}
         <div className="border-t border-slate-200/70 px-4 py-3">
+          <div className="mb-2 flex w-fit gap-1 rounded-xl bg-slate-100/80 p-1 ring-1 ring-slate-200/70">
+            <button
+              type="button"
+              onClick={() => switchMode('single')}
+              className={[
+                'flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-[11px] font-bold transition-colors',
+                mode === 'single' ? 'bg-white text-sky-600 shadow-sm ring-1 ring-slate-200/80' : 'text-slate-500 hover:text-slate-700',
+              ].join(' ')}
+            >
+              <ScanLine className="h-3.5 w-3.5" /> Single image
+              <span className="hidden font-semibold text-slate-400 sm:inline">· scene</span>
+            </button>
+            <button
+              type="button"
+              onClick={() => switchMode('pair')}
+              className={[
+                'flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-[11px] font-bold transition-colors',
+                mode === 'pair' ? 'bg-white text-sky-600 shadow-sm ring-1 ring-slate-200/80' : 'text-slate-500 hover:text-slate-700',
+              ].join(' ')}
+            >
+              <Images className="h-3.5 w-3.5" /> Two images
+              <span className="hidden font-semibold text-slate-400 sm:inline">· change</span>
+            </button>
+          </div>
+
           {(t1 || t2) && (
             <div className="mb-2 flex flex-wrap gap-2">
               {t1 && (
@@ -359,16 +403,35 @@ const ChatView: React.FC<ChatViewProps> = ({ settings, onInspect, onAddRecent, i
           )}
 
           <div className="flex items-end gap-2">
-            <label className="glass-input flex cursor-pointer items-center gap-1.5 rounded-xl px-3 py-2.5 text-xs font-bold text-slate-600 transition-colors hover:bg-slate-100/70" title="Attach a single image for scene analysis (or use it as the T1 baseline)">
-              <FileImage className="h-4 w-4 text-indigo-500" />
-              Image
-              <input type="file" accept="image/*" className="hidden" onChange={(e) => attach('t1', e.target.files?.[0] ?? null)} />
-            </label>
-            <label className="glass-input flex cursor-pointer items-center gap-1.5 rounded-xl px-3 py-2.5 text-xs font-bold text-slate-600 transition-colors hover:bg-slate-100/70" title="Attach a second image for change detection (optional)">
-              <FileImage className="h-4 w-4 text-emerald-500" />
-              T2
-              <input type="file" accept="image/*" className="hidden" onChange={(e) => attach('t2', e.target.files?.[0] ?? null)} />
-            </label>
+            {mode === 'single' ? (
+              <label
+                className="glass-input flex cursor-pointer items-center gap-1.5 rounded-xl px-3 py-2.5 text-xs font-bold text-slate-600 transition-colors hover:bg-slate-100/70"
+                title="Attach the single image to analyze its scene"
+              >
+                <FileImage className="h-4 w-4 text-indigo-500" />
+                Image
+                <input type="file" accept="image/*" className="hidden" onChange={(e) => attach('t1', e.target.files?.[0] ?? null)} />
+              </label>
+            ) : (
+              <>
+                <label
+                  className="glass-input flex cursor-pointer items-center gap-1.5 rounded-xl px-3 py-2.5 text-xs font-bold text-slate-600 transition-colors hover:bg-slate-100/70"
+                  title="Attach T1 baseline"
+                >
+                  <FileImage className="h-4 w-4 text-indigo-500" />
+                  T1
+                  <input type="file" accept="image/*" className="hidden" onChange={(e) => attach('t1', e.target.files?.[0] ?? null)} />
+                </label>
+                <label
+                  className="glass-input flex cursor-pointer items-center gap-1.5 rounded-xl px-3 py-2.5 text-xs font-bold text-slate-600 transition-colors hover:bg-slate-100/70"
+                  title="Attach T2 observation"
+                >
+                  <FileImage className="h-4 w-4 text-emerald-500" />
+                  T2
+                  <input type="file" accept="image/*" className="hidden" onChange={(e) => attach('t2', e.target.files?.[0] ?? null)} />
+                </label>
+              </>
+            )}
 
             <input
               value={input}
@@ -379,7 +442,7 @@ const ChatView: React.FC<ChatViewProps> = ({ settings, onInspect, onAddRecent, i
                   run();
                 }
               }}
-              placeholder="Ask about one image, or attach two to measure change…"
+              placeholder={mode === 'single' ? 'Ask about your image…' : 'Ask what changed between your images…'}
               className="glass-input min-w-0 flex-1 rounded-xl px-4 py-2.5 text-sm font-medium text-slate-800 placeholder:text-slate-400 outline-none"
               aria-label="Chat message"
             />
@@ -398,7 +461,11 @@ const ChatView: React.FC<ChatViewProps> = ({ settings, onInspect, onAddRecent, i
               <button
                 key={tag}
                 type="button"
-                onClick={() => run(tag)}
+                onClick={() => {
+                  const m: ChatMode = tag === 'Single-Scene Classification' ? 'single' : 'pair';
+                  switchMode(m);
+                  run(tag, m);
+                }}
                 disabled={thinking}
                 className="rounded-full bg-white/60 px-2.5 py-1 text-[10px] font-bold text-slate-600 ring-1 ring-slate-200/70 transition-all hover:bg-white disabled:opacity-40"
               >

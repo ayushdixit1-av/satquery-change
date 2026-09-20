@@ -64,6 +64,7 @@ const App: React.FC = () => {
   const [mobileOpen, setMobileOpen] = useState(false);
   const [chatKey, setChatKey] = useState(1);
   const [seedQuery, setSeedQuery] = useState('');
+  const [seedMode, setSeedMode] = useState<'single' | 'pair'>('pair');
   const [modal, setModal] = useState<AnalysisItem | null>(null);
   const [settings, setSettings] = useState<SatQuerySettings>(DEFAULT_SETTINGS);
   const [analyses, setAnalyses] = useState<AnalysisItem[]>(SAMPLE_ANALYSES);
@@ -83,8 +84,9 @@ const App: React.FC = () => {
     setMobileOpen(false);
   };
 
-  const startChat = (query = '') => {
+  const startChat = (query = '', mode: 'single' | 'pair' = 'pair') => {
     setSeedQuery(query);
+    setSeedMode(mode);
     setChatKey((k) => k + 1);
     setView('chat');
     setMobileOpen(false);
@@ -103,11 +105,12 @@ const App: React.FC = () => {
   const handleFeature = (action: string) => {
     const map: Record<string, string> = {
       'chat-scene': 'Describe this scene in full — land cover, vegetation health, water and structure.',
+      'chat-upload': 'Diff this T1/T2 pair — box every zone where anything changed.',
       'chat-ask': 'Show me what changed near the dock between June and now.',
       'chat-multi': 'Run a full multi-task scan: land cover, NDVI health and water extent over this AOI.',
       'chat-evidence': 'Give me an evidence-based answer with precision and recall on this imagery pair.',
     };
-    startChat(map[action] ?? '');
+    startChat(map[action] ?? '', action === 'chat-scene' ? 'single' : 'pair');
   };
 
   return (
@@ -154,6 +157,7 @@ const App: React.FC = () => {
                 onInspect={setModal}
                 onAddRecent={addRecent}
                 initialQuery={seedQuery}
+                initialMode={seedMode}
               />
             )}
 

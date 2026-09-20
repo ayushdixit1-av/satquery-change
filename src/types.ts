@@ -21,6 +21,8 @@ export interface AnalysisItem {
   trace: string[];
 }
 
+export type ChatMode = 'single' | 'pair';
+
 export interface ChatMessage {
   id: string;
   role: 'user' | 'assistant';
