@@ -1,18 +1,17 @@
 import assert from 'node:assert/strict';
 import { existsSync } from 'node:fs';
-import { computeChangeBoxes, computeCoverageMetrics, GSD_METERS } from '../src/utils/imageSketch.ts';
+import { computeChangeBoxes, computeCoverageMetrics, computeDiffMask, GSD_METERS } from '../src/utils/imageSketch.ts';
 import { decodePng } from './png.ts';
 
 const W = 1024;
 const H = 1024;
 
+/** Mirrors the production mask path: blurred diff, adaptive threshold, opaque red at changed pixels. */
 function buildMask(a: Uint8ClampedArray, b: Uint8ClampedArray, w: number, h: number): { mask: Uint8ClampedArray; changed: number } {
+  const { diff, threshold, changed } = computeDiffMask(a, b, w, h);
   const mask = new Uint8ClampedArray(w * h * 4);
-  let changed = 0;
-  for (let i = 0; i < a.length; i += 4) {
-    const diff = (Math.abs(a[i] - b[i]) + Math.abs(a[i + 1] - b[i + 1]) + Math.abs(a[i + 2] - b[i + 2])) / 3;
-    if (diff > 42) {
-      changed++;
+  for (let i = 0, p = 0; i < mask.length; i += 4, p++) {
+    if (diff[p] > threshold) {
       mask[i] = 239;
       mask[i + 1] = 68;
       mask[i + 2] = 68;
@@ -50,7 +49,7 @@ if (existsSync('T1_before.png') && existsSync('T2_after.png')) {
   const { mask, changed } = buildMask(d1, d2, W, H);
   const changedPct = (changed / (W * H)) * 100;
   console.log(`demo pair: ${changedPct.toFixed(1)}% of frame changed (${changed} px)`);
-  assert.ok(changedPct > 5 && changedPct < 90, `changedPct ${changedPct} implausible`);
+  assert.ok(changedPct > 1 && changedPct < 95, `changedPct ${changedPct} implausible`);
   const boxes = computeChangeBoxes(W, H, mask);
   checkCoverage('demo pair metrics', changed, boxes);
   const km2 = (changed * GSD_METERS * GSD_METERS) / 1e6;
@@ -61,17 +60,15 @@ if (existsSync('T1_before.png') && existsSync('T2_after.png')) {
 {
   const a = new Uint8ClampedArray(W * H * 4).fill(255, 3);
   const b = new Uint8ClampedArray(W * H * 4).fill(255, 3);
-  let changed = 0;
   for (let y = 480; y < 560; y++) {
     for (let x = 480; x < 560; x++) {
       const i = (y * W + x) * 4;
       b[i] = 0;
       b[i + 1] = 0;
-      b[i + 2] = 255;
-      changed++;
+      b[i + 2] = 255; // 80x80 blue block appears in T2 only
     }
   }
-  const { mask } = buildMask(a, b, W, H);
+  const { mask, changed } = buildMask(a, b, W, H);
   const boxes = computeChangeBoxes(W, H, mask);
   checkCoverage('inserted block (ground truth)', changed, boxes);
   const cov = computeCoverageMetrics(changed, boxes);

@@ -50,6 +50,12 @@ const GATE_WORDS = [
   'scene',
   'see',
   'look',
+  'change',
+  'changed',
+  'compare',
+  'difference',
+  'impact',
+  'between',
 ];
 
 export const GEMINI_MODELS = [
@@ -245,6 +251,13 @@ async function callBackendBoost(baseUrl: string, payload: BoostPayload): Promise
   }
 }
 
+const REPORT_PROMPT_SUFFIX =
+  'Format every answer the same analyst way:\n' +
+  'line 1: "HEADLINE: <one sentence; the single biggest measured change>"\n' +
+  'then 2-4 bullet lines: per-zone findings tied to the measured numbers (what, direction, scale, zone numbers)\n' +
+  'final line: "LIMITS: <one honest sentence: pixel-derived estimate, assumed scale, no field verification>"\n' +
+  'Never invent numbers, categories, or zones beyond the evidence provided. Return JSON with one field "summary" containing exactly that text.';
+
 export async function boostScene(
   settings: SatQuerySettings,
   scene: { imageUrl: string; fileName: string; classes: { label: string; pct: number }[]; vegetationHealth: number; waterPct: number; urbanPct: number; brightness: number; detail: number; cloudPct: number },
@@ -293,8 +306,8 @@ export async function boostScene(
       `open water ${scene.waterPct.toFixed(1)}%; built/exposed ${scene.urbanPct.toFixed(1)}%; ` +
       `brightness ${Math.round(scene.brightness * 100)}%; structural detail ${Math.round(scene.detail * 100)}%; ` +
       `cloud cover ${scene.cloudPct.toFixed(1)}%. Look at the reference image of "${scene.fileName}" and ` +
-      `answer the question "${query}" by describing the scene in 3-6 vivid but strictly evidence-based sentences. ` +
-      `Return JSON with a single field "summary".`;
+      `answer the question "${query}". ` +
+      REPORT_PROMPT_SUFFIX;
 
     const raw = await callGemini(settings.geminiKey, settings.geminiModel, [{ text: prompt }, { inlineData: { mimeType: image.mime, data: image.b64 } }], SCHEMA);
     const text = extractSummary(raw ?? '');
@@ -306,11 +319,25 @@ export async function boostScene(
   }
 }
 
+export interface ChangeZoneSummary {
+  index: number;
+  quirk: string;
+  changedKm2: number;
+  ratioPct: number;
+  kind: string;
+  greennessBefore: number;
+  greennessAfter: number;
+  brightnessBefore: number;
+  brightnessAfter: number;
+}
+
 export async function boostChange(
   settings: SatQuerySettings,
   analysis: Pick<AnalysisItem, 't1Image' | 't2Image' | 'metrics'>,
   evidenceImageUrl: string,
   query: string,
+  zones?: ChangeZoneSummary[],
+  gsdMeters?: number,
 ): Promise<BoostResult> {
   if (settings.geminiMode === 'off') return { ok: false, error: 'gemini-off' };
   const viaBackend = settings.apiMode === 'live' && settings.apiUrl.trim() !== '';
@@ -327,6 +354,14 @@ export async function boostChange(
     const image = await toSmallJpeg(evidenceImageUrl);
     if (!image) return { ok: false, error: 'img' };
     const m = a.metrics;
+    const zoneText = zones?.length
+      ? zones
+          .map(
+            (z) =>
+              `#${z.index} ${z.quirk}: ${z.ratioPct.toFixed(0)}% of box changed (~${z.changedKm2.toFixed(2)} km²), likely ${z.kind} (greenness ${z.greennessBefore.toFixed(2)}→${z.greennessAfter.toFixed(2)}, brightness ${Math.round(z.brightnessBefore * 100)}%→${Math.round(z.brightnessAfter * 100)}%)`,
+          )
+          .join(' | ')
+      : '(none labeled)';
 
     if (viaBackend) {
       const r = await callBackendBoost(settings.apiUrl, {
@@ -343,6 +378,8 @@ export async function boostChange(
             f1: m.f1,
             iou: m.iou,
           },
+          gsdMeters,
+          zones: zones ?? [],
         },
       });
       if (r.ok && r.text) cacheSet(key, r.text);
@@ -350,13 +387,12 @@ export async function boostChange(
     }
 
     const prompt =
-      `You are a remote-sensing change-detection analyst. A device already measured this T1/T2 pair. ` +
-      `The composite image shows T2 with red numbered boxes around detected change zones. ` +
-      `Ground truth (measured on-device, do not invent beyond it): changed area ${m.changedAreaPct.toFixed(1)}% ` +
-      `(≈ ${a.metrics.changedAreaKm2.toFixed(2)} km² with your scale), Precision ${m.precision.toFixed(1)}, Recall ${m.recall.toFixed(1)}, ` +
-      `F1 ${m.f1.toFixed(1)}, IoU ${m.iou.toFixed(1)}. Look at the boxed zones in the image and, answering the ` +
-      `question "${query}", explain in 4-7 sentences WHAT changed in each visible zone and the overall picture. ` +
-      `Describe only what the boxes/evidence support. Return JSON with a single field "summary".`;
+      `You are a remote-sensing change-detection analyst writing a findings report. A device already measured this T1/T2 pair on-device; the composite image shows T2 with numbered boxes at the detected zones. ` +
+      `Measured ground truth (cite only this): net change ${m.changedAreaPct.toFixed(1)}% (≈ ${a.metrics.changedAreaKm2.toFixed(2)} km², ${gsdMeters ?? 30} m/px assumed), ` +
+      `coverage Precision ${m.precision.toFixed(1)} / Recall ${m.recall.toFixed(1)} / F1 ${m.f1.toFixed(1)} / IoU ${m.iou.toFixed(1)}. ` +
+      `Zones measured: ${zoneText}. ` +
+      `Answer the question "${query}" based strictly on those zones and numbers. ` +
+      REPORT_PROMPT_SUFFIX;
 
     const raw = await callGemini(settings.geminiKey, settings.geminiModel, [{ text: prompt }, { inlineData: { mimeType: image.mime, data: image.b64 } }], SCHEMA);
     const text = extractSummary(raw ?? '');

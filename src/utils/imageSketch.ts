@@ -5,6 +5,24 @@
  *  - a plain-text natural-language summary of where the changes are.
  */
 
+export type ChangeKind = 'vegetation-loss' | 'vegetation-gain' | 'brightening' | 'darkening' | 'mixed';
+
+export const KIND_LABEL: Record<ChangeKind, string> = {
+  'vegetation-loss': 'vegetation removed / dying off',
+  'vegetation-gain': 'vegetation regrowth / new cover',
+  brightening: 'surface brightening (exposure, bare ground, new construction)',
+  darkening: 'surface darkening (possible flooding, new built footprint, shadow)',
+  mixed: 'mixed spectral shift (multiple surface types)',
+};
+
+export interface ZoneSemantics {
+  kind: ChangeKind;
+  greennessBefore: number;
+  greennessAfter: number;
+  brightnessBefore: number;
+  brightnessAfter: number;
+}
+
 export interface ChangeRegion {
   x: number;
   y: number;
@@ -12,6 +30,7 @@ export interface ChangeRegion {
   h: number;
   ratio: number;
   changedPixels: number;
+  semantics?: ZoneSemantics;
 }
 
 /** Assumed ground-sample distance when no sensor metadata is supplied (m/pixel). */
@@ -34,6 +53,7 @@ export interface SketchEvidenceResult {
   width: number;
   height: number;
   gsdMeters: number;
+  diffThreshold: number;
   coverage: CoverageMetrics;
 }
 
@@ -53,6 +73,170 @@ export function computeCoverageMetrics(totalChanged: number, boxes: ChangeRegion
   const union = totalChanged + boxArea - tp;
   const iou = union > 0 ? tp / union : 0;
   return { precision, recall, f1, iou };
+}
+
+/** Separable 3×3 box blur (radius 1) over a Float32 raster. */
+function boxBlur3(src: Float32Array, w: number, h: number): Float32Array {
+  const tmp = new Float32Array(src.length);
+  const out = new Float32Array(src.length);
+  for (let y = 0; y < h; y++) {
+    const row = y * w;
+    for (let x = 0; x < w; x++) {
+      let s = 0;
+      let n = 0;
+      for (let dx = -1; dx <= 1; dx++) {
+        const xx = x + dx;
+        if (xx >= 0 && xx < w) {
+          s += src[row + xx];
+          n++;
+        }
+      }
+      tmp[row + x] = s / n;
+    }
+  }
+  for (let y = 0; y < h; y++) {
+    for (let x = 0; x < w; x++) {
+      let s = 0;
+      let n = 0;
+      for (let dy = -1; dy <= 1; dy++) {
+        const yy = y + dy;
+        if (yy >= 0 && yy < h) {
+          s += tmp[yy * w + x];
+          n++;
+        }
+      }
+      out[y * w + x] = s / n;
+    }
+  }
+  return out;
+}
+
+export const MIN_DIFF_THRESHOLD = 8;
+
+/** Otsu threshold on the diff histogram — picks the valley between the
+ *  unchanged and changed pixel populations, robust for any change proportion. */
+function otsuThreshold(values: Float32Array, n: number, max = 255): number {
+  const hist = new Float64Array(max + 1);
+  for (let i = 0; i < n; i++) {
+    const b = Math.round(Math.min(max, Math.max(0, values[i])));
+    hist[b]++;
+  }
+  let sum = 0;
+  for (let b = 0; b <= max; b++) sum += b * hist[b];
+  let sumB = 0;
+  let wB = 0;
+  let best = 0;
+  let bestVar = -1;
+  for (let b = 0; b <= max; b++) {
+    wB += hist[b];
+    if (wB === 0) continue;
+    const wF = n - wB;
+    if (wF === 0) break;
+    sumB += b * hist[b];
+    const mB = sumB / wB;
+    const mF = (sum - sumB) / wF;
+    const between = wB * wF * (mB - mF) * (mB - mF);
+    if (between > bestVar) {
+      bestVar = between;
+      best = b;
+    }
+  }
+  return best;
+}
+
+export interface DiffMaskOutput {
+  /** Per-pixel mean absolute RGB difference (blurred unless disabled), length w*h. */
+  diff: Float32Array;
+  /** The threshold actually applied (Otsu valley, floored at MIN_DIFF_THRESHOLD). */
+  threshold: number;
+  /** Number of pixels above threshold (diff > threshold). */
+  changed: number;
+}
+
+/**
+ * Pure change-mask computation. Auto-tunes the difference threshold per pair
+ * with Otsu's method (the valley between unchanged and changed pixel
+ * populations) instead of a hardcoded 42, so it adapts to any scene. A light
+ * box blur suppresses JPEG speckle so zones are cleaner.
+ */
+export function computeDiffMask(
+  t1: Uint8ClampedArray,
+  t2: Uint8ClampedArray,
+  w: number,
+  h: number,
+  opts: { blur?: boolean; threshold?: number } = {},
+): DiffMaskOutput {
+  const n = w * h;
+  const diff = new Float32Array(n);
+  for (let i = 0, p = 0; i < t1.length; i += 4, p++) {
+    diff[p] = (Math.abs(t1[i] - t2[i]) + Math.abs(t1[i + 1] - t2[i + 1]) + Math.abs(t1[i + 2] - t2[i + 2])) / 3;
+  }
+  const denoised = opts.blur === false ? diff : boxBlur3(diff, w, h);
+  let threshold = opts.threshold ?? 0;
+  if (threshold <= 0) {
+    threshold = Math.max(MIN_DIFF_THRESHOLD, otsuThreshold(denoised, n));
+  }
+  let changed = 0;
+  for (let i = 0; i < n; i++) {
+    if (denoised[i] > threshold) changed++;
+  }
+  return { diff: denoised, threshold, changed };
+}
+
+// Greenness ExG index (normalized) above which a surface counts as vegetated.
+const VEG_BOUNDARY = 0.25;
+// 0..1 brightness delta that counts as exposure/flooding.
+export const BRIGHT_DELTA = 0.08;
+
+/**
+ * Per-zone multispectral deltas between T1 and T2 within a change box. RGB-only
+ * proxy indices: greenness ExG = (2g − r − b)/255, brightness = mean(RGB)/255.
+ */
+export function classifyZoneChange(
+  t1: Uint8ClampedArray,
+  t2: Uint8ClampedArray,
+  w: number,
+  region: ChangeRegion,
+): ZoneSemantics {
+  let g1 = 0;
+  let g2 = 0;
+  let b1 = 0;
+  let b2 = 0;
+  let n = 0;
+  const x1 = Math.max(0, region.x);
+  const y1 = Math.max(0, region.y);
+  const x2 = Math.min(w, region.x + region.w);
+  const y2 = Math.min(t1.length / 4 / w, region.y + region.h);
+  for (let y = y1; y < y2; y++) {
+    for (let x = x1; x < x2; x++) {
+      const i = (y * w + x) * 4;
+      g1 += (2 * t1[i + 1] - t1[i] - t1[i + 2]) / 255;
+      g2 += (2 * t2[i + 1] - t2[i] - t2[i + 2]) / 255;
+      b1 += (t1[i] + t1[i + 1] + t1[i + 2]) / 765;
+      b2 += (t2[i] + t2[i + 1] + t2[i + 2]) / 765;
+      n++;
+    }
+  }
+  if (n === 0) {
+    return { kind: 'mixed', greennessBefore: 0, greennessAfter: 0, brightnessBefore: 0, brightnessAfter: 0 };
+  }
+  const greennessBefore = g1 / n;
+  const greennessAfter = g2 / n;
+  const brightnessBefore = b1 / n;
+  const brightnessAfter = b2 / n;
+  const dG = greennessBefore - greennessAfter;
+  const dB = brightnessAfter - brightnessBefore;
+  let kind: ChangeKind = 'mixed';
+  if (greennessBefore >= VEG_BOUNDARY && greennessAfter < VEG_BOUNDARY && dG > 0) {
+    kind = 'vegetation-loss';
+  } else if (greennessBefore < VEG_BOUNDARY && greennessAfter >= VEG_BOUNDARY && dG < 0) {
+    kind = 'vegetation-gain';
+  } else if (dB >= BRIGHT_DELTA) {
+    kind = 'brightening';
+  } else if (dB <= -BRIGHT_DELTA) {
+    kind = 'darkening';
+  }
+  return { kind, greennessBefore, greennessAfter, brightnessBefore, brightnessAfter };
 }
 
 interface RawBox {
@@ -412,12 +596,7 @@ export function computeChangeBoxes(width: number, height: number, maskData: Uint
     .slice(0, 6);
 }
 
-function nth(i: number): string {
-  const words = ['1st', '2nd', '3rd', '4th', '5th', '6th'];
-  return words[i] ?? `${i + 1}th`;
-}
-
-function locate(r: ChangeRegion, width: number, height: number): string {
+export function zoneLocation(r: ChangeRegion, width: number, height: number): string {
   const cx = (r.x + r.w / 2) / width;
   const cy = (r.y + r.h / 2) / height;
   const horiz = cx < 0.33 ? 'left' : cx > 0.66 ? 'right' : 'centre';
@@ -426,33 +605,47 @@ function locate(r: ChangeRegion, width: number, height: number): string {
   return `${vert}-${horiz}`;
 }
 
-/** Natural-language description of the full change picture. */
+/** Analyst-style report from the measured evidence. */
 export function describeChanges(ev: SketchEvidenceResult): string {
-  const scaleNote = `assuming ${ev.gsdMeters} m/pixel ground sampling`;
+  const scaleNote = `pixel-based estimate at assumed ${ev.gsdMeters} m/px sampling, no field verification`;
+
   if (ev.regionCount === 0) {
     return [
-      'Change scan complete — no significant pixel-level delta was found in this pair.',
-      `Net difference stayed negligible across the AOI (≈ ${ev.changedPct.toFixed(1)}%), ${scaleNote}.`,
+      'HEADLINE: No significant pixel-level change detected in this pair.',
+      'The adaptive difference threshold flagged no zone as materially different.',
+      `LIMITS: ${scaleNote}.`,
     ].join('\n');
   }
 
   const c = ev.coverage;
-  const head = `Change scan complete: ${ev.regionCount} distinct change zone${ev.regionCount === 1 ? '' : 's'} boxed and labeled.`;
-  const lines = [
-    head,
-    `Net change: ${ev.changedPct.toFixed(1)}% of the area (≈ ${ev.changedKm2.toFixed(2)} km², ${scaleNote}).`,
-    `Zone fidelity: boxes capture ${(c.recall * 100).toFixed(0)}% of the detected change footprint at ${(c.precision * 100).toFixed(0)}% precision.`,
-  ];
+  const top = ev.regions[0];
+  const s = top.semantics;
+  const lines: string[] = [];
 
-  const totalChanged = ev.regions.reduce((s, r) => s + r.changedPixels, 0) || 1;
-  ev.regions.slice(0, 5).forEach((r, i) => {
-    const share = (r.changedPixels / totalChanged) * 100;
-    const shareTxt = share >= 90 && i === 0 ? 'the majority' : `~${Math.round(share)}%`;
-    lines.push(
-      `${nth(i)} region — ${locate(r, ev.width, ev.height)}: ${Math.round(r.ratio * 100)}% of that box changed, carrying ${shareTxt} of the total delta.`,
-    );
+  lines.push(
+    `HEADLINE: ${ev.regionCount} change zone${ev.regionCount === 1 ? '' : 's'} over ${ev.changedPct.toFixed(1)}% of the frame (≈ ${ev.changedKm2.toFixed(2)} km²)${s ? ` — biggest shift in ${zoneLocation(top, ev.width, ev.height)}: ${KIND_LABEL[s.kind]}` : ''}.`,
+  );
+
+  lines.push('');
+  lines.push('Per-zone findings:');
+  ev.regions.forEach((r, i) => {
+    const zone = r.semantics;
+    const km = (r.changedPixels * ev.gsdMeters * ev.gsdMeters) / 1e6;
+    const base = `- Zone ${i + 1} (${zoneLocation(r, ev.width, ev.height)}): ${Math.round(r.ratio * 100)}% of a ${r.w}×${r.h} px box changed (~${km.toFixed(2)} km²).`;
+    if (zone) {
+      lines.push(
+        `${base} ${KIND_LABEL[zone.kind]} — greenness ${zone.greennessBefore.toFixed(2)} → ${zone.greennessAfter.toFixed(2)}; brightness ${Math.round(zone.brightnessBefore * 100)}% → ${Math.round(zone.brightnessAfter * 100)}%.`,
+      );
+    } else {
+      lines.push(base);
+    }
   });
 
+  lines.push('');
+  lines.push(
+    `Coverage: boxes capture ${(c.recall * 100).toFixed(0)}% of the detected footprint at ${(c.precision * 100).toFixed(0)}% precision (F1 ${c.f1.toFixed(2)}, IoU ${c.iou.toFixed(2)}); difference threshold ${ev.diffThreshold.toFixed(1)} was auto-selected.`,
+  );
+  lines.push(`LIMITS: ${scaleNote}.`);
   return lines.join('\n');
 }
 
@@ -475,6 +668,7 @@ export async function generateSketchedEvidence(
       width,
       height,
       gsdMeters: GSD_METERS,
+      diffThreshold: MIN_DIFF_THRESHOLD,
       coverage: { precision: 0, recall: 0, f1: 0, iou: 0 },
     });
 
@@ -511,6 +705,7 @@ export async function generateSketchedEvidence(
         let changeRatio = 0.12;
         let changeBoxes: ChangeRegion[] = [];
         let diffPixels = 0;
+        let diffThreshold = MIN_DIFF_THRESHOLD;
         const totalPixels = width * height;
 
         if (ctx1 && ctx2) {
@@ -520,6 +715,10 @@ export async function generateSketchedEvidence(
           const d1 = ctx1.getImageData(0, 0, width, height).data;
           const d2 = ctx2.getImageData(0, 0, width, height).data;
 
+          const { diff, threshold, changed } = computeDiffMask(d1, d2, width, height);
+          diffPixels = changed;
+          diffThreshold = threshold;
+
           const maskCanvas = document.createElement('canvas');
           maskCanvas.width = width;
           maskCanvas.height = height;
@@ -527,15 +726,9 @@ export async function generateSketchedEvidence(
 
           if (mCtx) {
             const maskImg = mCtx.createImageData(width, height);
-            for (let i = 0; i < d1.length; i += 4) {
-              const dr = Math.abs(d1[i] - d2[i]);
-              const dg = Math.abs(d1[i + 1] - d2[i + 1]);
-              const db = Math.abs(d1[i + 2] - d2[i + 2]);
-              const diff = (dr + dg + db) / 3;
-
-              if (diff > 42) {
-                diffPixels++;
-                const tint = heatTint((diff - 42) / 200);
+            for (let i = 0, p = 0; i < maskImg.data.length; i += 4, p++) {
+              if (diff[p] > threshold) {
+                const tint = heatTint((diff[p] - threshold) / 200);
                 maskImg.data[i] = tint.r;
                 maskImg.data[i + 1] = tint.g;
                 maskImg.data[i + 2] = tint.b;
@@ -557,6 +750,10 @@ export async function generateSketchedEvidence(
 
             // Tight rectangle zones around the exact changed pixels
             changeBoxes = computeChangeBoxes(width, height, maskImg.data);
+            // RGB-only multispectral identification of what changed inside each box
+            changeBoxes.forEach((b) => {
+              b.semantics = classifyZoneChange(d1, d2, width, b);
+            });
           }
         }
 
@@ -633,6 +830,7 @@ export async function generateSketchedEvidence(
           width,
           height,
           gsdMeters: GSD_METERS,
+          diffThreshold,
           coverage,
         });
       } catch (e) {

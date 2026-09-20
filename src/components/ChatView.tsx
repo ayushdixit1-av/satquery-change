@@ -14,9 +14,9 @@ import {
 } from 'lucide-react';
 import type { AnalysisItem, ChatMessage, ChatMode, SatQuerySettings } from '../types';
 import { CAPABILITY_TAGS, createAnalysisFromQuery } from '../data/mockData';
-import { generateSketchedEvidence, describeChanges } from '../utils/imageSketch';
+import { generateSketchedEvidence, describeChanges, zoneLocation, KIND_LABEL, MIN_DIFF_THRESHOLD } from '../utils/imageSketch';
 import { analyzeScene } from '../utils/sceneAnalysis';
-import { boostScene, boostChange, shouldBoost } from '../lib/gemini';
+import { boostScene, boostChange, shouldBoost, type ChangeZoneSummary } from '../lib/gemini';
 import SwipeCompare from './SwipeCompare';
 import SceneResultCard from './SceneResultCard';
 import ChangeEvidenceView from './ChangeEvidenceView';
@@ -168,27 +168,29 @@ const ChatView: React.FC<ChatViewProps> = ({ settings, onInspect, onAddRecent, i
         }
         setAnalyzingScene(true);
         const scene = await analyzeScene(t1f.url, t1f.name);
+        const msgId = uid();
         let content = scene.description;
         let boosted = false;
+        setMessages((m) => [
+          ...m,
+          {
+            id: msgId,
+            role: 'assistant',
+            content,
+            timestamp: new Date().toISOString(),
+            scene,
+            boost: false,
+            attachments: { t1Url: t1f.url, t1Name: t1f.name },
+          },
+        ]);
         if (shouldBoost(query, settings.geminiMode)) {
           const b = await boostScene(settings, scene, query);
           if (b.ok && b.text) {
             content = b.text;
             boosted = true;
+            setMessages((m) => m.map((msg) => (msg.id === msgId ? { ...msg, content: b.text, boost: true } : msg)));
           }
         }
-        setMessages((m) => [
-          ...m,
-          {
-            id: uid(),
-            role: 'assistant',
-            content,
-            timestamp: new Date().toISOString(),
-            scene,
-            boost: boosted,
-            attachments: { t1Url: t1f.url, t1Name: t1f.name },
-          },
-        ]);
         return;
       }
 
@@ -249,42 +251,53 @@ const ChatView: React.FC<ChatViewProps> = ({ settings, onInspect, onAddRecent, i
       analysis.trace = [
         'Imagery pair ingested (T1 baseline & T2 observation)',
         'Multi-temporal spatial registration aligned',
-        'Pixel-difference mask computed on canvas',
+        `Pixel-difference mask computed auto-thresholded (Otsu, floor ${MIN_DIFF_THRESHOLD}; selected ${evidence.diffThreshold.toFixed(1)})`,
         `${evidence.regionCount} change zone${evidence.regionCount === 1 ? '' : 's'} isolated, boxed and ranked`,
+        `Per-zone multispectral deltas computed for each box (greenness / brightness)`,
         'Self-evaluated: zone coverage precision/recall/IoU vs the raw change mask',
         `Spatial scale assumed at ${evidence.gsdMeters} m/pixel ground sampling for area estimates`,
-        'Boxed evidence + plain-text change summary rendered on T2',
+        'Boxed evidence + plain-text change report rendered on T2',
       ];
+
+      const zoneSummaries: ChangeZoneSummary[] = evidence.regions.map((r, i) => ({
+        index: i + 1,
+        quirk: zoneLocation(r, evidence.width, evidence.height),
+        changedKm2: (r.changedPixels * evidence.gsdMeters * evidence.gsdMeters) / 1e6,
+        ratioPct: r.ratio * 100,
+        kind: r.semantics ? KIND_LABEL[r.semantics.kind] : 'mixed change',
+        greennessBefore: r.semantics?.greennessBefore ?? 0,
+        greennessAfter: r.semantics?.greennessAfter ?? 0,
+        brightnessBefore: r.semantics?.brightnessBefore ?? 0,
+        brightnessAfter: r.semantics?.brightnessAfter ?? 0,
+      }));
+
+      // Show the measured change report immediately; refine only if a boost lands below.
+      const msgId = uid();
+      setMessages((m) => [
+        ...m,
+        {
+          id: msgId,
+          role: 'assistant',
+          content: analysis.summary,
+          timestamp: new Date().toISOString(),
+          analysis,
+          boost: false,
+          attachments: { t1Url: t1f.url, t2Url: t2f.url, t1Name: t1f.name, t2Name: t2f.name },
+        },
+      ]);
 
       // 3) Gemini language boost (optional, gated + cached + capped)
       let boosted = false;
       if (shouldBoost(query, settings.geminiMode)) {
-        const b = await boostChange(settings, analysis, evidence.evidenceUrl, query);
+        const b = await boostChange(settings, analysis, evidence.evidenceUrl, query, zoneSummaries, evidence.gsdMeters);
         if (b.ok && b.text) {
           analysis.summary = b.text;
           boosted = true;
+          setMessages((m) => m.map((msg) => (msg.id === msgId ? { ...msg, content: b.text, boost: true } : msg)));
         }
       }
-      if (boosted) analysis.trace = [...analysis.trace, 'Gemini boost: language-only enhancement of measured evidence'];
+      if (boosted) analysis.trace = [...analysis.trace, 'Gemini boost: language report over the measured evidence'];
       onAddRecent(analysis);
-
-      setMessages((m) => [
-        ...m,
-        {
-          id: uid(),
-          role: 'assistant',
-          content:
-            analysis.summary +
-            '\n\nReady metrics: ' +
-            `Precision ${analysis.metrics.precision.toFixed(1)}, ` +
-            `Recall ${analysis.metrics.recall.toFixed(1)}, ` +
-            `F1 ${analysis.metrics.f1.toFixed(1)}, IoU ${analysis.metrics.iou.toFixed(1)}.`,
-          timestamp: new Date().toISOString(),
-          analysis,
-          boost: boosted,
-          attachments: { t1Url: t1f.url, t2Url: t2f.url, t1Name: t1f.name, t2Name: t2f.name },
-        },
-      ]);
     } catch (e) {
       console.error(e);
       setMessages((m) => [

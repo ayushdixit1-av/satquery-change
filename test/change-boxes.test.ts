@@ -1,16 +1,14 @@
 import assert from 'node:assert/strict';
 import { existsSync } from 'node:fs';
-import { computeChangeBoxes } from '../src/utils/imageSketch.ts';
+import { computeChangeBoxes, computeDiffMask, MIN_DIFF_THRESHOLD } from '../src/utils/imageSketch.ts';
 import { decodePng } from './png.ts';
 
-/** Mirrors the exact mask imageSketch builds: alpha=130 tint where mean RGB diff > 42. */
+/** Mirrors the mask imageSketch feeds into computeChangeBoxes (blurred diff, adaptive threshold, alpha=130). */
 function buildMask(a: Uint8ClampedArray, b: Uint8ClampedArray, w: number, h: number): Uint8ClampedArray {
+  const { diff, threshold } = computeDiffMask(a, b, w, h);
   const mask = new Uint8ClampedArray(w * h * 4);
-  for (let i = 0; i < a.length; i += 4) {
-    const dr = Math.abs(a[i] - b[i]);
-    const dg = Math.abs(a[i + 1] - b[i + 1]);
-    const db = Math.abs(a[i + 2] - b[i + 2]);
-    if ((dr + dg + db) / 3 > 42) {
+  for (let i = 0, p = 0; i < mask.length; i += 4, p++) {
+    if (diff[p] > threshold) {
       mask[i] = 239;
       mask[i + 1] = 68;
       mask[i + 2] = 68;
@@ -27,12 +25,12 @@ const H = 1024;
 if (existsSync('T1_before.png') && existsSync('T2_after.png')) {
   const { data: d1 } = decodePng('T1_before.png');
   const { data: d2 } = decodePng('T2_after.png');
+  const { diff, threshold, changed } = computeDiffMask(d1, d2, W, H);
+  assert.ok(threshold >= MIN_DIFF_THRESHOLD && threshold <= 90, `adaptive threshold sane: ${threshold.toFixed(1)}`);
+  console.log(`adaptive threshold=${threshold.toFixed(1)}; changed pixels: ${changed.toLocaleString()} (${((changed / (W * H)) * 100).toFixed(2)}% of frame)`);
+  void diff;
+
   const mask = buildMask(d1, d2, W, H);
-
-  let changed = 0;
-  for (let i = 0; i < mask.length; i += 4) if (mask[i + 3]) changed++;
-  console.log(`changed pixels: ${changed.toLocaleString()} (${((changed / (W * H)) * 100).toFixed(2)}% of frame)`);
-
   const boxes = computeChangeBoxes(W, H, mask);
   console.log(`regionCount = ${boxes.length}`);
   for (const b of boxes) {
