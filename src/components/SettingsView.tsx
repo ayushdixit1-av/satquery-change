@@ -226,7 +226,7 @@ const SettingsView: React.FC<SettingsViewProps> = ({ settings, onChange }) => {
               onClick={purge}
               className="flex items-center gap-1.5 rounded-xl bg-red-500/10 px-3.5 py-2 text-[11px] font-bold text-red-600 transition-colors hover:bg-red-500/20"
             >
-              <Trash2 className="h-3.5 w-3.5" /> Purge analysis cache
+              <Trash2 className="h-3.5 w-3.5" /> Clear previous scan storage
             </button>
             <button
               type="button"
@@ -236,7 +236,7 @@ const SettingsView: React.FC<SettingsViewProps> = ({ settings, onChange }) => {
               <RotateCcw className="h-3.5 w-3.5" /> Restore defaults
             </button>
             <span className="text-[10px] font-semibold text-slate-400">
-              Everything is stored locally in your browser — never uploaded.
+              Scans are session-only — nothing is stored or uploaded after you leave.
             </span>
           </div>
         </section>

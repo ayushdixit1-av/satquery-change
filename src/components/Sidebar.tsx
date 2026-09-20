@@ -21,9 +21,9 @@ export interface SidebarProps {
 }
 
 export const USER = {
-  name: 'Ayaan Satnav',
+  name: 'SatQuery Analyst',
   email: 'analyst@satquery.ai',
-  initials: 'AS',
+  initials: 'SQ',
 };
 
 const Sidebar: React.FC<SidebarProps> = ({

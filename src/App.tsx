@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { Home, MessageSquareText, GalleryHorizontalEnd, Settings2, LifeBuoy } from 'lucide-react';
-import Sidebar, { type NavItem } from './components/Sidebar';
+import Sidebar, { USER, type NavItem } from './components/Sidebar';
 import TopBar from './components/TopBar';
 import HeroSection from './components/HeroSection';
 import FeatureCards from './components/FeatureCards';
@@ -13,8 +13,7 @@ import SettingsView from './components/SettingsView';
 import { SAMPLE_ANALYSES } from './data/mockData';
 import { DEFAULT_SETTINGS, type AnalysisItem, type AppView, type SatQuerySettings } from './types';
 
-const ANALYSES_KEY = 'satquery.analyses';
-const SETTINGS_KEY = 'satquery.settings';
+const LEGACY_STORAGE_KEYS = ['satquery.analyses', 'satquery.settings'];
 
 const NAV_ITEMS: NavItem[] = [
   { id: 'home', label: 'Home', icon: Home },
@@ -23,16 +22,6 @@ const NAV_ITEMS: NavItem[] = [
   { id: 'settings', label: 'Settings & Model', icon: Settings2 },
   { id: 'help', label: 'Help & Support', icon: LifeBuoy },
 ];
-
-function loadJSON<T>(key: string, fallback: T): T {
-  try {
-    const raw = localStorage.getItem(key);
-    if (!raw) return fallback;
-    return { ...fallback, ...(JSON.parse(raw) as T) };
-  } catch {
-    return fallback;
-  }
-}
 
 function CosmicBackdrop() {
   const stars = useMemo(
@@ -77,34 +66,18 @@ const App: React.FC = () => {
   const [chatKey, setChatKey] = useState(1);
   const [seedQuery, setSeedQuery] = useState('');
   const [modal, setModal] = useState<AnalysisItem | null>(null);
-  const [settings, setSettings] = useState<SatQuerySettings>(() =>
-    loadJSON(SETTINGS_KEY, DEFAULT_SETTINGS),
-  );
-  const [analyses, setAnalyses] = useState<AnalysisItem[]>(() => {
-    try {
-      const raw = localStorage.getItem(ANALYSES_KEY);
-      if (raw) return JSON.parse(raw) as AnalysisItem[];
-    } catch {
-      // ignore corrupt cache
-    }
-    return SAMPLE_ANALYSES;
-  });
+  const [settings, setSettings] = useState<SatQuerySettings>(DEFAULT_SETTINGS);
+  const [analyses, setAnalyses] = useState<AnalysisItem[]>(SAMPLE_ANALYSES);
 
   useEffect(() => {
-    try {
-      localStorage.setItem(SETTINGS_KEY, JSON.stringify(settings));
-    } catch {
-      // quota exceeded — ignore
-    }
-  }, [settings]);
-
-  useEffect(() => {
-    try {
-      localStorage.setItem(ANALYSES_KEY, JSON.stringify(analyses));
-    } catch {
-      // quota exceeded — ignore
-    }
-  }, [analyses]);
+    LEGACY_STORAGE_KEYS.forEach((key) => {
+      try {
+        localStorage.removeItem(key);
+      } catch {
+        // ignore
+      }
+    });
+  }, []);
 
   const go = (id: string) => {
     setView(id as AppView);
@@ -238,13 +211,13 @@ const App: React.FC = () => {
                 <div className="glass-panel mt-6 rounded-3xl p-6">
                   <div className="flex flex-wrap items-center gap-4">
                     <span className="flex h-16 w-16 items-center justify-center rounded-2xl bg-slate-900 text-xl font-extrabold text-white">
-                      AS
+                      {USER.initials}
                     </span>
                     <div>
-                      <p className="text-lg font-extrabold text-slate-900">Ayaan Satnav</p>
-                      <p className="text-xs font-semibold text-slate-500">analyst@satquery.ai</p>
+                      <p className="text-lg font-extrabold text-slate-900">{USER.name}</p>
+                      <p className="text-xs font-semibold text-slate-500">{USER.email}</p>
                       <p className="mt-1 inline-flex rounded-full bg-sky-500/10 px-2.5 py-0.5 text-[10px] font-bold text-sky-700">
-                        On-device analyst · no cloud round-trips
+                        On-device analyst · no cloud round-trips · no stored scans
                       </p>
                     </div>
                   </div>
