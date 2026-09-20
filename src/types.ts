@@ -35,7 +35,7 @@ export interface ChatMessage {
   };
 }
 
-export type AppView = 'home' | 'chat' | 'saved' | 'settings' | 'help' | 'profile';
+export type AppView = 'home' | 'chat' | 'settings' | 'help' | 'profile';
 
 export interface SatQuerySettings {
   apiUrl: string;

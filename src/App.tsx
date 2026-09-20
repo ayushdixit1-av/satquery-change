@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { Home, MessageSquareText, GalleryHorizontalEnd, Settings2, LifeBuoy } from 'lucide-react';
+import { Home, MessageSquareText, Settings2, LifeBuoy } from 'lucide-react';
 import Sidebar, { USER, type NavItem } from './components/Sidebar';
 import TopBar from './components/TopBar';
 import HeroSection from './components/HeroSection';
@@ -18,7 +18,6 @@ const LEGACY_STORAGE_KEYS = ['satquery.analyses', 'satquery.settings'];
 const NAV_ITEMS: NavItem[] = [
   { id: 'home', label: 'Home', icon: Home },
   { id: 'chat', label: 'Ask Satellite', icon: MessageSquareText },
-  { id: 'saved', label: 'Saved Analyses', icon: GalleryHorizontalEnd, badge: 'demo' },
   { id: 'settings', label: 'Settings & Model', icon: Settings2 },
   { id: 'help', label: 'Help & Support', icon: LifeBuoy },
 ];
@@ -155,10 +154,6 @@ const App: React.FC = () => {
                 onAddRecent={addRecent}
                 initialQuery={seedQuery}
               />
-            )}
-
-            {view === 'saved' && (
-              <RecentAnalyses items={analyses} onInspect={setModal} onNewChat={() => startChat('')} />
             )}
 
             {view === 'settings' && <SettingsView settings={settings} onChange={updateSettings} />}
