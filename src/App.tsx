@@ -58,6 +58,36 @@ function CosmicBackdrop() {
   );
 }
 
+interface SeedFile {
+  url: string;
+  name: string;
+  size: string;
+}
+
+interface SeedAttachments {
+  t1?: SeedFile;
+  t2?: SeedFile;
+}
+
+function readSeedFile(file: File): Promise<SeedFile> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () =>
+      resolve({
+        url: String(reader.result),
+        name: file.name,
+        size:
+          file.size >= 1024 * 1024
+            ? `${(file.size / (1024 * 1024)).toFixed(1)} MB`
+            : file.size >= 1024
+              ? `${(file.size / 1024).toFixed(1)} KB`
+              : `${file.size} B`,
+      });
+    reader.onerror = reject;
+    reader.readAsDataURL(file);
+  });
+}
+
 const App: React.FC = () => {
   const [view, setView] = useState<AppView>('home');
   const [collapsed, setCollapsed] = useState(false);
@@ -65,6 +95,7 @@ const App: React.FC = () => {
   const [chatKey, setChatKey] = useState(1);
   const [seedQuery, setSeedQuery] = useState('');
   const [seedMode, setSeedMode] = useState<'single' | 'pair'>('pair');
+  const [seedAttachments, setSeedAttachments] = useState<SeedAttachments>({});
   const [modal, setModal] = useState<AnalysisItem | null>(null);
   const [settings, setSettings] = useState<SatQuerySettings>(() => {
     try {
@@ -107,12 +138,26 @@ const App: React.FC = () => {
     setMobileOpen(false);
   };
 
-  const startChat = (query = '', mode: 'single' | 'pair' = 'pair') => {
+  const startChat = (query = '', mode: 'single' | 'pair' = 'pair', attach: SeedAttachments = {}) => {
     setSeedQuery(query);
     setSeedMode(mode);
+    setSeedAttachments(attach);
     setChatKey((k) => k + 1);
     setView('chat');
     setMobileOpen(false);
+  };
+
+  const handleDropImages = (files: File[]) => {
+    const imgs = files.filter((f) => f.type.startsWith('image/'));
+    if (!imgs.length) return;
+    void (async () => {
+      const [a, b] = await Promise.all([readSeedFile(imgs[0]), imgs[1] ? readSeedFile(imgs[1]) : undefined]);
+      startChat(
+        imgs.length >= 2 ? 'Measure everything that changed between these images.' : 'Describe this scene in full.',
+        imgs.length >= 2 ? 'pair' : 'single',
+        { t1: a, t2: b },
+      );
+    })();
   };
 
   const addRecent = (item: AnalysisItem) => {
@@ -167,6 +212,7 @@ const App: React.FC = () => {
                 <QueryInputCard
                   onQuery={(q) => startChat(q)}
                   onAttachImages={() => startChat('I uploaded a T1/T2 pair — measure everything that changed.')}
+                  onDropImages={handleDropImages}
                 />
                 <RecentAnalyses items={analyses} onInspect={setModal} onNewChat={() => startChat('')} />
                 <PromoBanner onAction={() => startChat('Compare a before/after satellite pair and show me the delta.')} />
@@ -181,6 +227,8 @@ const App: React.FC = () => {
                 onAddRecent={addRecent}
                 initialQuery={seedQuery}
                 initialMode={seedMode}
+                initialT1={seedAttachments.t1}
+                initialT2={seedAttachments.t2}
               />
             )}
 

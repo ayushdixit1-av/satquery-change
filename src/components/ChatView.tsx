@@ -26,6 +26,8 @@ export interface ChatViewProps {
   onAddRecent: (item: AnalysisItem) => void;
   initialQuery?: string;
   initialMode?: ChatMode;
+  initialT1?: AttachFile;
+  initialT2?: AttachFile;
 }
 
 interface AttachFile {
@@ -56,14 +58,15 @@ function formatBytes(bytes: number): string {
 
 const uid = () => `msg-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
 
-const ChatView: React.FC<ChatViewProps> = ({ settings, onInspect, onAddRecent, initialQuery, initialMode }) => {
+const ChatView: React.FC<ChatViewProps> = ({ settings, onInspect, onAddRecent, initialQuery, initialMode, initialT1, initialT2 }) => {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [input, setInput] = useState(initialQuery ?? '');
   const [mode, setMode] = useState<ChatMode>(initialMode ?? 'pair');
-  const [t1, setT1] = useState<AttachFile | null>(null);
-  const [t2, setT2] = useState<AttachFile | null>(null);
+  const [t1, setT1] = useState<AttachFile | null>(initialT1 ?? null);
+  const [t2, setT2] = useState<AttachFile | null>(initialT2 ?? null);
   const [thinking, setThinking] = useState(false);
   const [analyzingScene, setAnalyzingScene] = useState(false);
+  const [dragging, setDragging] = useState(false);
   const listRef = useRef<HTMLDivElement | null>(null);
 
   const scrollToBottom = () => {
@@ -89,6 +92,37 @@ const ChatView: React.FC<ChatViewProps> = ({ settings, onInspect, onAddRecent, i
   const switchMode = (m: ChatMode) => {
     setMode(m);
     if (m === 'single') setT2(null);
+  };
+
+  const handleDropFiles = (files: FileList) => {
+    const imgs = Array.from(files).filter((f) => f.type.startsWith('image/'));
+    if (!imgs.length) return;
+    if (imgs.length >= 2 && mode === 'single') setMode('pair');
+    void readFile(imgs[0]).then((f) => setT1(f));
+    if (imgs[1]) void readFile(imgs[1]).then((f) => setT2(f));
+  };
+
+  const dragDepth = useRef(0);
+  const handleDragEnter = (e: React.DragEvent) => {
+    if (!e.dataTransfer.types.includes('Files')) return;
+    e.preventDefault();
+    dragDepth.current += 1;
+    setDragging(true);
+  };
+  const handleDragLeave = (e: React.DragEvent) => {
+    if (!e.dataTransfer.types.includes('Files')) return;
+    e.preventDefault();
+    dragDepth.current -= 1;
+    if (dragDepth.current <= 0) {
+      dragDepth.current = 0;
+      setDragging(false);
+    }
+  };
+  const handleDrop = (e: React.DragEvent) => {
+    e.preventDefault();
+    dragDepth.current = 0;
+    setDragging(false);
+    handleDropFiles(e.dataTransfer.files);
   };
 
   const run = async (rawQuery?: string, forceMode?: ChatMode) => {
@@ -296,6 +330,9 @@ const ChatView: React.FC<ChatViewProps> = ({ settings, onInspect, onAddRecent, i
               <p className="mt-1 text-xs font-medium text-slate-500">
                 Pick a mode below — one image for a full scene read, or two images to measure what changed between them.
               </p>
+              <p className="mt-2 inline-flex items-center gap-1 rounded-full bg-white/60 px-3 py-1 text-[10px] font-bold text-slate-500 ring-1 ring-slate-200/70">
+                <FileImage className="h-3 w-3 text-sky-500" /> Drag &#38; drop images anywhere below, or use the buttons
+              </p>
             </div>
           )}
 
@@ -370,7 +407,28 @@ const ChatView: React.FC<ChatViewProps> = ({ settings, onInspect, onAddRecent, i
         </div>
 
         {/* Composer */}
-        <div className="border-t border-slate-200/70 px-4 py-3">
+        <div
+          className="relative border-t border-slate-200/70 px-4 py-3"
+          onDragEnter={handleDragEnter}
+          onDragOver={(e) => {
+            if (e.dataTransfer.types.includes('Files')) e.preventDefault();
+          }}
+          onDragLeave={handleDragLeave}
+          onDrop={handleDrop}
+        >
+          {dragging && (
+            <div className="pointer-events-none absolute inset-0 z-10 flex items-center justify-center rounded-3xl bg-sky-500/10 ring-4 ring-sky-400/60">
+              <div className="flex flex-col items-center gap-1.5 rounded-2xl bg-white px-5 py-3 shadow-lg">
+                <FileImage className="h-5 w-5 text-sky-500" />
+                <p className="text-xs font-extrabold text-slate-800">
+                  Drop to attach {mode === 'single' ? '1 image' : '2 images'}
+                </p>
+                <p className="text-[10px] font-medium text-slate-500">
+                  {mode === 'single' ? '…for a full scene read' : '…for change detection (T1 → T2)'}
+                </p>
+              </div>
+            </div>
+          )}
           <div className="mb-2 flex w-fit gap-1 rounded-xl bg-slate-100/80 p-1 ring-1 ring-slate-200/70">
             <button
               type="button"
