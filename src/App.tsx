@@ -66,8 +66,31 @@ const App: React.FC = () => {
   const [seedQuery, setSeedQuery] = useState('');
   const [seedMode, setSeedMode] = useState<'single' | 'pair'>('pair');
   const [modal, setModal] = useState<AnalysisItem | null>(null);
-  const [settings, setSettings] = useState<SatQuerySettings>(DEFAULT_SETTINGS);
+  const [settings, setSettings] = useState<SatQuerySettings>(() => {
+    try {
+      const raw = localStorage.getItem('satquery.gemini');
+      return raw ? { ...DEFAULT_SETTINGS, ...(JSON.parse(raw) as Partial<SatQuerySettings>) } : DEFAULT_SETTINGS;
+    } catch {
+      return DEFAULT_SETTINGS;
+    }
+  });
   const [analyses, setAnalyses] = useState<AnalysisItem[]>(SAMPLE_ANALYSES);
+
+  useEffect(() => {
+    try {
+      localStorage.setItem(
+        'satquery.gemini',
+        JSON.stringify({
+          geminiKey: settings.geminiKey,
+          geminiModel: settings.geminiModel,
+          geminiMode: settings.geminiMode,
+          geminiDailyCap: settings.geminiDailyCap,
+        }),
+      );
+    } catch {
+      // ignore
+    }
+  }, [settings.geminiKey, settings.geminiModel, settings.geminiMode, settings.geminiDailyCap]);
 
   useEffect(() => {
     LEGACY_STORAGE_KEYS.forEach((key) => {

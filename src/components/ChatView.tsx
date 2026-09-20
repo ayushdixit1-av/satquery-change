@@ -16,6 +16,7 @@ import type { AnalysisItem, ChatMessage, ChatMode, SatQuerySettings } from '../t
 import { CAPABILITY_TAGS, createAnalysisFromQuery } from '../data/mockData';
 import { generateSketchedEvidence, describeChanges } from '../utils/imageSketch';
 import { analyzeScene } from '../utils/sceneAnalysis';
+import { boostScene, boostChange, shouldBoost } from '../lib/gemini';
 import SwipeCompare from './SwipeCompare';
 import SceneResultCard from './SceneResultCard';
 
@@ -132,14 +133,24 @@ const ChatView: React.FC<ChatViewProps> = ({ settings, onInspect, onAddRecent, i
         }
         setAnalyzingScene(true);
         const scene = await analyzeScene(t1f.url, t1f.name);
+        let content = scene.description;
+        let boosted = false;
+        if (shouldBoost(query, settings.geminiMode)) {
+          const b = await boostScene(settings, scene, query);
+          if (b.ok && b.text) {
+            content = b.text;
+            boosted = true;
+          }
+        }
         setMessages((m) => [
           ...m,
           {
             id: uid(),
             role: 'assistant',
-            content: scene.description,
+            content,
             timestamp: new Date().toISOString(),
             scene,
+            boost: boosted,
             attachments: { t1Url: t1f.url, t1Name: t1f.name },
           },
         ]);
@@ -197,6 +208,17 @@ const ChatView: React.FC<ChatViewProps> = ({ settings, onInspect, onAddRecent, i
         `${evidence.regionCount} change zone${evidence.regionCount === 1 ? '' : 's'} isolated, boxed and ranked`,
         'Boxed evidence + plain-text change summary rendered on T2',
       ];
+
+      // 3) Gemini language boost (optional, gated + cached + capped)
+      let boosted = false;
+      if (shouldBoost(query, settings.geminiMode)) {
+        const b = await boostChange(settings, analysis, evidence.evidenceUrl, query);
+        if (b.ok && b.text) {
+          analysis.summary = b.text;
+          boosted = true;
+        }
+      }
+      if (boosted) analysis.trace = [...analysis.trace, 'Gemini boost: language-only enhancement of measured evidence'];
       onAddRecent(analysis);
 
       setMessages((m) => [
@@ -212,6 +234,7 @@ const ChatView: React.FC<ChatViewProps> = ({ settings, onInspect, onAddRecent, i
             `F1 ${analysis.metrics.f1.toFixed(1)}, IoU ${analysis.metrics.iou.toFixed(1)}.`,
           timestamp: new Date().toISOString(),
           analysis,
+          boost: boosted,
           attachments: { t1Url: t1f.url, t2Url: t2f.url, t1Name: t1f.name, t2Name: t2f.name },
         },
       ]);
@@ -248,7 +271,8 @@ const ChatView: React.FC<ChatViewProps> = ({ settings, onInspect, onAddRecent, i
             <div>
               <p className="text-sm font-extrabold tracking-tight text-slate-900">SatQuery Geospatial Assistant</p>
               <p className="text-[10px] font-semibold text-slate-500">
-                {settings.apiMode === 'live' && settings.apiUrl ? 'Live model endpoint' : 'On-device engine'} · private & offline
+                {settings.apiMode === 'live' && settings.apiUrl ? 'Live model endpoint' : 'On-device engine'} ·{' '}
+                {settings.geminiKey ? 'Gemini boost ready' : 'private & offline'}
               </p>
             </div>
           </div>
@@ -301,6 +325,12 @@ const ChatView: React.FC<ChatViewProps> = ({ settings, onInspect, onAddRecent, i
                 <p className="mt-1 text-right text-[10px] opacity-50">
                   {new Date(msg.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
                 </p>
+
+                {msg.boost && (
+                  <span className="mt-2 inline-flex items-center gap-1 rounded-full bg-amber-500/15 px-2 py-0.5 text-[9px] font-bold uppercase tracking-wide text-amber-600">
+                    <Sparkles className="h-2.5 w-2.5" /> Gemini boost
+                  </span>
+                )}
 
                 {msg.scene && <SceneResultCard scene={msg.scene} />}
 

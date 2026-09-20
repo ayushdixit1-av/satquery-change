@@ -30,6 +30,7 @@ export interface ChatMessage {
   timestamp: string;
   analysis?: AnalysisItem;
   scene?: SceneResult;
+  boost?: boolean;
   attachments?: {
     t1Url?: string;
     t2Url?: string;
@@ -47,6 +48,10 @@ export interface SatQuerySettings {
   cloudTolerance: 5 | 10 | 20 | 50;
   indices: string[];
   crs: string;
+  geminiKey: string;
+  geminiModel: string;
+  geminiMode: 'off' | 'auto' | 'always';
+  geminiDailyCap: number;
 }
 
 export const DEFAULT_SETTINGS: SatQuerySettings = {
@@ -56,6 +61,10 @@ export const DEFAULT_SETTINGS: SatQuerySettings = {
   cloudTolerance: 10,
   indices: ['NDVI', 'NDWI'],
   crs: 'EPSG:4326',
+  geminiKey: '',
+  geminiModel: 'gemini-2.5-flash',
+  geminiMode: 'auto',
+  geminiDailyCap: 20,
 };
 
 export type AnalysisCategory = AnalysisItem['category'];
