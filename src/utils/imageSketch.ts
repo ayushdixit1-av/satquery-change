@@ -90,14 +90,16 @@ function mergeBoxes(boxes: RawBox[]): RawBox[] {
 }
 
 /**
- * Cluster the change mask into regions, then shrink each cluster's bounding
- * box down to the exact changed pixels (grid seeds it, pixels refine it).
+ * Cluster the change mask into regions, splitting connected blobs at the pixel
+ * level so dense change zones get their own boxes instead of one whole-frame
+ * outline. Cells seed candidate zones; 8-connected pixels refine the bounds.
  */
-function computeChangeBoxes(width: number, height: number, maskData: Uint8ClampedArray): ChangeRegion[] {
+export function computeChangeBoxes(width: number, height: number, maskData: Uint8ClampedArray): ChangeRegion[] {
   const totalPixels = width * height;
   const alphaAt = (px: number, py: number) => maskData[(py * width + px) * 4 + 3];
 
-  // 1. Coarse occupancy grid for seeding clusters
+  // 1. Coarse occupancy grid for seeding clusters (cells only qualify if a
+  //    meaningful share of their area is actually changed)
   const cols = Math.min(96, Math.max(28, Math.ceil(width / 12)));
   const rows = Math.min(96, Math.max(28, Math.ceil(height / 12)));
   const cellW = width / cols;
@@ -115,14 +117,15 @@ function computeChangeBoxes(width: number, height: number, maskData: Uint8Clampe
     }
   }
 
+  const cellArea = cellW * cellH;
   const cellActive = new Uint8Array(cols * rows);
   for (let j = 0; j < rows; j++) {
     for (let i = 0; i < cols; i++) {
-      if (cellHits[j * cols + i] > 1) cellActive[j * cols + i] = 1;
+      if (cellHits[j * cols + i] >= Math.max(2, cellArea * 0.12)) cellActive[j * cols + i] = 1;
     }
   }
 
-  // 2. Flood-fill connected cells into candidate regions
+  // 2. Flood-fill connected cells into candidate zones
   const visited = new Uint8Array(cols * rows);
   const stack: number[] = [];
   const seeds: { minI: number; maxI: number; minJ: number; maxJ: number; size: number }[] = [];
@@ -168,51 +171,89 @@ function computeChangeBoxes(width: number, height: number, maskData: Uint8Clampe
     }
   }
 
-  // 3. Refine each seed to the exact changed-pixel bounds
+  // 3. Within each zone, run 8-connected component labeling on the exact
+  //    changed pixels so spatially separate change areas stay separate.
+  const minPixels = Math.max(12, Math.round(totalPixels * 0.0003));
   const raw: RawBox[] = [];
-  const minPixels = Math.max(12, Math.round(totalPixels * 0.0008));
 
   for (const seed of seeds) {
-    const px0 = Math.floor(seed.minI * cellW) - 2;
-    const py0 = Math.floor(seed.minJ * cellH) - 2;
-    const px1 = Math.ceil((seed.maxI + 1) * cellW) + 2;
-    const py1 = Math.ceil((seed.maxJ + 1) * cellH) + 2;
-    const sx0 = Math.max(0, px0);
-    const sy0 = Math.max(0, py0);
-    const sx1 = Math.min(width - 1, px1);
-    const sy1 = Math.min(height - 1, py1);
+    const sx0 = Math.max(0, Math.floor(seed.minI * cellW) - 2);
+    const sy0 = Math.max(0, Math.floor(seed.minJ * cellH) - 2);
+    const sx1 = Math.min(width - 1, Math.ceil((seed.maxI + 1) * cellW) + 2);
+    const sy1 = Math.min(height - 1, Math.ceil((seed.maxJ + 1) * cellH) + 2);
 
-    let x0 = Infinity;
-    let y0 = Infinity;
-    let x1 = -Infinity;
-    let y1 = -Infinity;
-    let cnt = 0;
+    const wl = sx1 - sx0 + 1;
+    const hl = sy1 - sy0 + 1;
+    const seen = new Uint8Array(wl * hl);
+    const label = new Int32Array(wl * hl).fill(-1);
+    const sizeOf = new Map<number, number>();
+    const stack2: number[] = [];
+    let nextLabel = 0;
 
-    for (let yy = sy0; yy <= sy1; yy++) {
-      for (let xx = sx0; xx <= sx1; xx++) {
-        if (alphaAt(xx, yy) > MASK_ALPHA) {
-          cnt++;
-          if (xx < x0) x0 = xx;
-          if (xx > x1) x1 = xx;
-          if (yy < y0) y0 = yy;
-          if (yy > y1) y1 = yy;
+    for (let yy = 0; yy < hl; yy++) {
+      for (let xx = 0; xx < wl; xx++) {
+        const gx = sx0 + xx;
+        const gy = sy0 + yy;
+        const key = yy * wl + xx;
+        if (seen[key] || alphaAt(gx, gy) <= MASK_ALPHA) continue;
+        seen[key] = 1;
+        label[key] = nextLabel;
+        sizeOf.set(nextLabel, 1);
+        stack2.push(key);
+
+        while (stack2.length) {
+          const cur = stack2.pop()!;
+          const cx = cur % wl;
+          const cy = (cur - cx) / wl;
+          for (let dy = -1; dy <= 1; dy++) {
+            for (let dx = -1; dx <= 1; dx++) {
+              if (!dx && !dy) continue;
+              const nx = cx + dx;
+              const ny = cy + dy;
+              if (nx < 0 || ny < 0 || nx >= wl || ny >= hl) continue;
+              const nk = ny * wl + nx;
+              if (seen[nk] || alphaAt(sx0 + nx, sy0 + ny) <= MASK_ALPHA) continue;
+              seen[nk] = 1;
+              label[nk] = nextLabel;
+              sizeOf.set(nextLabel, (sizeOf.get(nextLabel) ?? 0) + 1);
+              stack2.push(nk);
+            }
+          }
         }
+        nextLabel++;
       }
     }
 
-    if (cnt < minPixels) continue;
+    const bounds = new Map<number, { x0: number; y0: number; x1: number; y1: number }>();
+    for (let yy = 0; yy < hl; yy++) {
+      for (let xx = 0; xx < wl; xx++) {
+        const lb = label[yy * wl + xx];
+        if (lb < 0) continue;
+        const b = bounds.get(lb) ?? { x0: Infinity, y0: Infinity, x1: -Infinity, y1: -Infinity };
+        const gx = sx0 + xx;
+        const gy = sy0 + yy;
+        b.x0 = Math.min(b.x0, gx);
+        b.x1 = Math.max(b.x1, gx);
+        b.y0 = Math.min(b.y0, gy);
+        b.y1 = Math.max(b.y1, gy);
+        bounds.set(lb, b);
+      }
+    }
 
-    const pad = 3;
-    const bx0 = Math.max(0, x0 - pad);
-    const by0 = Math.max(0, y0 - pad);
-    const bx1 = Math.min(width - 1, x1 + pad);
-    const by1 = Math.min(height - 1, y1 + pad);
-
-    if (bx1 - bx0 < 8 || by1 - by0 < 8) continue;
-    raw.push({ x0: bx0, y0: by0, x1: bx1, y1: by1, cnt });
+    for (const [lb, b] of bounds) {
+      const cnt = sizeOf.get(lb) ?? 0;
+      if (cnt < minPixels) continue;
+      const pad = 3;
+      const bx0 = Math.max(0, b.x0 - pad);
+      const by0 = Math.max(0, b.y0 - pad);
+      const bx1 = Math.min(width - 1, b.x1 + pad);
+      const by1 = Math.min(height - 1, b.y1 + pad);
+      if (bx1 - bx0 < 8 || by1 - by0 < 8) continue;
+      raw.push({ x0: bx0, y0: by0, x1: bx1, y1: by1, cnt });
+    }
   }
 
-  // 4. Merge overlapping neighbors, drop sparse echoes, keep the top regions
+  // 4. Merge overlapping neighbours, drop sparse echoes, keep top regions
   return mergeBoxes(raw)
     .map((b) => {
       const w = b.x1 - b.x0 + 1;
@@ -226,7 +267,7 @@ function computeChangeBoxes(width: number, height: number, maskData: Uint8Clampe
         ratio: b.cnt / (w * h),
       };
     })
-    .filter((b) => b.ratio >= 0.03)
+    .filter((b) => b.ratio >= 0.08)
     .sort((a, b) => b.changedPixels - a.changedPixels)
     .slice(0, 6);
 }
@@ -347,7 +388,7 @@ export async function generateSketchedEvidence(
               const db = Math.abs(d1[i + 2] - d2[i + 2]);
               const diff = (dr + dg + db) / 3;
 
-              if (diff > 28) {
+              if (diff > 42) {
                 diffPixels++;
                 maskImg.data[i] = 239;
                 maskImg.data[i + 1] = 68;
