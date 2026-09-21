@@ -198,7 +198,7 @@ export const GooeyNav: React.FC<GooeyNavProps> = ({
 
   return (
     <div
-      className={`gooey-nav-container ${vertical ? 'vertical' : ''} ${className}`}
+      className={`gooey-nav-container h-full ${vertical ? 'vertical' : ''} ${className}`}
       ref={containerRef}
     >
       {/* SVG Liquid Gooey Filter */}
