@@ -31,25 +31,11 @@ const HeroSection: React.FC<HeroSectionProps> = ({ onStart }) => {
             Ask. Analyze. Discover.
           </h2>
 
-          {/* Handwritten annotation + curved dashed arrow */}
+          {/* Handwritten annotation */}
           <div className="relative mt-3 inline-block">
             <p className="sq-handwritten text-2xl text-amber-300 sm:text-3xl" style={{ transform: 'rotate(-2deg)' }}>
               yes — any two dates, any two images
             </p>
-            <svg
-              className="pointer-events-none absolute -right-8 -top-3 hidden h-14 w-28 sm:block"
-              viewBox="0 0 120 60"
-              fill="none"
-              aria-hidden="true"
-            >
-              <path
-                d="M6 52 C 30 44, 58 40, 90 16 S 112 4, 116 6"
-                stroke="#fbbf24"
-                strokeWidth="2"
-                strokeDasharray="5 6"
-                strokeLinecap="round"
-              />
-            </svg>
           </div>
 
           <p className="mt-5 max-w-xl text-base font-medium leading-relaxed text-slate-300">
