@@ -1,5 +1,5 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { Bell, Command, Menu, Search, Signal, CloudSun, ArrowUpWideNarrow, Satellite } from 'lucide-react';
+import { Bell, Command, Menu, Search, ArrowUpWideNarrow } from 'lucide-react';
 import { SatQueryLogo } from './SatQueryLogo';
 import { USER } from './Sidebar';
 
@@ -78,24 +78,6 @@ const TopBar: React.FC<TopBarProps> = ({ onOpenMenu, onQuerySubmit, onNewChat, o
         </form>
 
         <div className="ml-auto flex shrink-0 items-center gap-2">
-          {/* Telemetry status */}
-          <div className="glass-pill hidden items-center gap-2 rounded-xl px-3 py-1.5 xl:flex" title="Satellite link status">
-            <Satellite className="h-3.5 w-3.5 text-sky-600" />
-            <span className="text-[10px] font-bold text-slate-600">Sentinel-2</span>
-            <span className="relative flex h-2 w-2 items-center justify-center" aria-hidden="true">
-              <span className="sq-live-dot relative inline-flex h-2 w-2 rounded-full bg-emerald-500 text-emerald-500" />
-            </span>
-            <span className="text-[10px] font-semibold text-emerald-600">LIVE</span>
-          </div>
-          <div className="glass-pill hidden items-center gap-2 rounded-xl px-3 py-1.5 lg:flex" title="Telemetry uplink">
-            <Signal className="h-3.5 w-3.5 text-indigo-500" />
-            <span className="text-[10px] font-bold text-slate-600">-72 dBm</span>
-          </div>
-          <div className="glass-pill hidden items-center gap-2 rounded-xl px-3 py-1.5 md:flex" title="Cloud cover tolerance">
-            <CloudSun className="h-3.5 w-3.5 text-amber-500" />
-            <span className="text-[10px] font-bold text-slate-600">&lt;10%</span>
-          </div>
-
           {/* Notifications */}
           <button
             type="button"
