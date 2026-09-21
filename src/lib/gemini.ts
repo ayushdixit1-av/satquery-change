@@ -252,10 +252,10 @@ async function callBackendBoost(baseUrl: string, payload: BoostPayload): Promise
 }
 
 const REPORT_PROMPT_SUFFIX =
-  'Format every answer the same analyst way:\n' +
-  'line 1: "HEADLINE: <one sentence; the single biggest measured change>"\n' +
-  'then 2-4 bullet lines: per-zone findings tied to the measured numbers (what, direction, scale, zone numbers)\n' +
-  'final line: "LIMITS: <one honest sentence: pixel-derived estimate, assumed scale, no field verification>"\n' +
+  'Format every answer the same way, in plain, easy-to-understand language (no jargon, no acronyms):\n' +
+  'line 1: "HEADLINE: <one simple sentence; the single biggest measured change>"\n' +
+  'then 2-4 short bullet lines: where each change is, what it looks like, how big it is (use plain words and the measured numbers)\n' +
+  'final line: "LIMITS: <one honest sentence: rough pixel estimate, assumed scale, not checked on the ground>"\n' +
   'Never invent numbers, categories, or zones beyond the evidence provided. Return JSON with one field "summary" containing exactly that text.';
 
 export async function boostScene(

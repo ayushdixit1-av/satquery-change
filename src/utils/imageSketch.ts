@@ -15,6 +15,14 @@ export const KIND_LABEL: Record<ChangeKind, string> = {
   mixed: 'mixed spectral shift (multiple surface types)',
 };
 
+export const KIND_PLAIN: Record<ChangeKind, string> = {
+  'vegetation-loss': 'plants were removed or dried out',
+  'vegetation-gain': 'new plants grew back',
+  brightening: 'the surface got brighter - more bare ground, exposed earth, or new construction',
+  darkening: 'the surface got darker - possibly flooding, new buildings, or shadows',
+  mixed: 'several different surface changes happened in the same spot',
+};
+
 export interface ZoneSemantics {
   kind: ChangeKind;
   greennessBefore: number;
@@ -605,14 +613,14 @@ export function zoneLocation(r: ChangeRegion, width: number, height: number): st
   return `${vert}-${horiz}`;
 }
 
-/** Analyst-style report from the measured evidence. */
+/** Plain-language summary of where the changes are, from the measured evidence. */
 export function describeChanges(ev: SketchEvidenceResult): string {
-  const scaleNote = `pixel-based estimate at assumed ${ev.gsdMeters} m/px sampling, no field verification`;
+  const scaleNote = `rough estimate based on about ${ev.gsdMeters} m per pixel, not checked on the ground`;
 
   if (ev.regionCount === 0) {
     return [
-      'HEADLINE: No significant pixel-level change detected in this pair.',
-      'The adaptive difference threshold flagged no zone as materially different.',
+      'HEADLINE: no real change was found between these two images.',
+      'They look almost the same at the pixel level.',
       `LIMITS: ${scaleNote}.`,
     ].join('\n');
   }
@@ -623,27 +631,31 @@ export function describeChanges(ev: SketchEvidenceResult): string {
   const lines: string[] = [];
 
   lines.push(
-    `HEADLINE: ${ev.regionCount} change zone${ev.regionCount === 1 ? '' : 's'} over ${ev.changedPct.toFixed(1)}% of the frame (≈ ${ev.changedKm2.toFixed(2)} km²)${s ? ` — biggest shift in ${zoneLocation(top, ev.width, ev.height)}: ${KIND_LABEL[s.kind]}` : ''}.`,
+    `HEADLINE: found ${ev.regionCount} area${ev.regionCount === 1 ? '' : 's'} that changed, covering about ${ev.changedPct.toFixed(0)}% of the image (roughly ${ev.changedKm2.toFixed(0)} km²).${s ? ` The biggest change is near the ${zoneLocation(top, ev.width, ev.height)} — ${KIND_PLAIN[s.kind]}.` : ''}`,
   );
 
   lines.push('');
-  lines.push('Per-zone findings:');
+  lines.push('Where things changed:');
   ev.regions.forEach((r, i) => {
     const zone = r.semantics;
     const km = (r.changedPixels * ev.gsdMeters * ev.gsdMeters) / 1e6;
-    const base = `- Zone ${i + 1} (${zoneLocation(r, ev.width, ev.height)}): ${Math.round(r.ratio * 100)}% of a ${r.w}×${r.h} px box changed (~${km.toFixed(2)} km²).`;
+    const pct = Math.round(r.ratio * 100);
+    const loc = zoneLocation(r, ev.width, ev.height).replace(/^./, (ch) => ch.toUpperCase());
+    const base = `- ${i + 1}. ${loc}: about ${pct}% of this area changed (~${km.toFixed(0)} km²).`;
     if (zone) {
-      lines.push(
-        `${base} ${KIND_LABEL[zone.kind]} — greenness ${zone.greennessBefore.toFixed(2)} → ${zone.greennessAfter.toFixed(2)}; brightness ${Math.round(zone.brightnessBefore * 100)}% → ${Math.round(zone.brightnessAfter * 100)}%.`,
-      );
+      const g0 = zone.greennessBefore.toFixed(2);
+      const g1 = zone.greennessAfter.toFixed(2);
+      const b0 = Math.round(zone.brightnessBefore * 100);
+      const b1 = Math.round(zone.brightnessAfter * 100);
+      lines.push(`${base} ${KIND_PLAIN[zone.kind]} (vegetation signal ${g0} → ${g1}; brightness ${b0}% → ${b1}%).`);
     } else {
-      lines.push(base);
+      lines.push(`${base} Some surface change was detected here.`);
     }
   });
 
   lines.push('');
   lines.push(
-    `Coverage: boxes capture ${(c.recall * 100).toFixed(0)}% of the detected footprint at ${(c.precision * 100).toFixed(0)}% precision (F1 ${c.f1.toFixed(2)}, IoU ${c.iou.toFixed(2)}); difference threshold ${ev.diffThreshold.toFixed(1)} was auto-selected.`,
+    `Coverage: the marked boxes include ${(c.recall * 100).toFixed(0)}% of everything that changed (so little was missed), and about ${(c.precision * 100).toFixed(0)}% of what is boxed is a real change (F1 ${c.f1.toFixed(2)}, IoU ${c.iou.toFixed(2)}). The sensitivity level (${ev.diffThreshold.toFixed(1)}) was picked automatically.`,
   );
   lines.push(`LIMITS: ${scaleNote}.`);
   return lines.join('\n');
