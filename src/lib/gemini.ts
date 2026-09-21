@@ -252,11 +252,11 @@ async function callBackendBoost(baseUrl: string, payload: BoostPayload): Promise
 }
 
 const REPORT_PROMPT_SUFFIX =
-  'Format every answer the same way, in plain, easy-to-understand language (no jargon, no acronyms):\n' +
-  'line 1: "HEADLINE: <one simple sentence; the single biggest measured change>"\n' +
-  'then 2-4 short bullet lines: where each change is, what it looks like, how big it is (use plain words and the measured numbers)\n' +
-  'final line: "LIMITS: <one honest sentence: rough pixel estimate, assumed scale, not checked on the ground>"\n' +
-  'Never invent numbers, categories, or zones beyond the evidence provided. Return JSON with one field "summary" containing exactly that text.';
+  'Answer like a short, friendly summary — plain everyday language, no jargon, no acronyms, no bullet headers:\n' +
+  'paragraph 1: how many main areas changed, roughly what fraction/size of the image, and where the biggest change is\n' +
+  'paragraph 2: what each kind of change looks like (darker, brighter, plants cleared, regrowth, etc.) with the measured numbers\n' +
+  'final short paragraph: honest caveat that these are estimates and should be verified against newer imagery or ground observations\n' +
+  'Never invent numbers, categories, or areas beyond the evidence provided. Return JSON with one field "summary" containing exactly that text.';
 
 export async function boostScene(
   settings: SatQuerySettings,

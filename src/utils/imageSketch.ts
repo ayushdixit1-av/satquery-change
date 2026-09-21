@@ -15,14 +15,6 @@ export const KIND_LABEL: Record<ChangeKind, string> = {
   mixed: 'mixed spectral shift (multiple surface types)',
 };
 
-export const KIND_PLAIN: Record<ChangeKind, string> = {
-  'vegetation-loss': 'plants were removed or dried out',
-  'vegetation-gain': 'new plants grew back',
-  brightening: 'the surface got brighter - more bare ground, exposed earth, or new construction',
-  darkening: 'the surface got darker - possibly flooding, new buildings, or shadows',
-  mixed: 'several different surface changes happened in the same spot',
-};
-
 export interface ZoneSemantics {
   kind: ChangeKind;
   greennessBefore: number;
@@ -613,52 +605,66 @@ export function zoneLocation(r: ChangeRegion, width: number, height: number): st
   return `${vert}-${horiz}`;
 }
 
-/** Plain-language summary of where the changes are, from the measured evidence. */
+/** Short, friendly, plain-language summary of where the changes are, from the measured evidence. */
 export function describeChanges(ev: SketchEvidenceResult): string {
   const scaleNote = `rough estimate based on about ${ev.gsdMeters} m per pixel, not checked on the ground`;
 
   if (ev.regionCount === 0) {
     return [
-      'HEADLINE: no real change was found between these two images.',
-      'They look almost the same at the pixel level.',
-      `LIMITS: ${scaleNote}.`,
+      'I compared the two images and found no real change — they look almost the same at the pixel level.',
+      `${scaleNote}.`,
     ].join('\n');
   }
 
   const c = ev.coverage;
+  const parts: string[] = [];
+
+  const n = ev.regionCount;
   const top = ev.regions[0];
-  const s = top.semantics;
-  const lines: string[] = [];
+  const bigLoc = `the ${zoneLocation(top, ev.width, ev.height)}`;
+  const second = ev.regions[1] ? ` and near the ${zoneLocation(ev.regions[1], ev.width, ev.height)}` : '';
+  const head =
+    `I found ${n} main area${n === 1 ? '' : 's'} that appear to have changed, covering about ${ev.changedPct.toFixed(0)}% of the image (roughly ${ev.changedKm2.toFixed(0)} km²). The biggest change is around ${bigLoc}${second}.`;
+  parts.push(head);
 
-  lines.push(
-    `HEADLINE: found ${ev.regionCount} area${ev.regionCount === 1 ? '' : 's'} that changed, covering about ${ev.changedPct.toFixed(0)}% of the image (roughly ${ev.changedKm2.toFixed(0)} km²).${s ? ` The biggest change is near the ${zoneLocation(top, ev.width, ev.height)} — ${KIND_PLAIN[s.kind]}.` : ''}`,
-  );
-
-  lines.push('');
-  lines.push('Where things changed:');
-  ev.regions.forEach((r, i) => {
-    const zone = r.semantics;
-    const km = (r.changedPixels * ev.gsdMeters * ev.gsdMeters) / 1e6;
-    const pct = Math.round(r.ratio * 100);
-    const loc = zoneLocation(r, ev.width, ev.height).replace(/^./, (ch) => ch.toUpperCase());
-    const base = `- ${i + 1}. ${loc}: about ${pct}% of this area changed (~${km.toFixed(0)} km²).`;
-    if (zone) {
-      const g0 = zone.greennessBefore.toFixed(2);
-      const g1 = zone.greennessAfter.toFixed(2);
-      const b0 = Math.round(zone.brightnessBefore * 100);
-      const b1 = Math.round(zone.brightnessAfter * 100);
-      lines.push(`${base} ${KIND_PLAIN[zone.kind]} (vegetation signal ${g0} → ${g1}; brightness ${b0}% → ${b1}%).`);
-    } else {
-      lines.push(`${base} Some surface change was detected here.`);
-    }
+  const byLoc = new Map<ChangeKind, string[]>();
+  ev.regions.forEach((r) => {
+    const k = r.semantics?.kind ?? 'mixed';
+    const loc = `the ${zoneLocation(r, ev.width, ev.height)}`;
+    const list = byLoc.get(k) ?? [];
+    list.push(loc);
+    byLoc.set(k, list);
   });
 
-  lines.push('');
-  lines.push(
-    `Coverage: the marked boxes include ${(c.recall * 100).toFixed(0)}% of everything that changed (so little was missed), and about ${(c.precision * 100).toFixed(0)}% of what is boxed is a real change (F1 ${c.f1.toFixed(2)}, IoU ${c.iou.toFixed(2)}). The sensitivity level (${ev.diffThreshold.toFixed(1)}) was picked automatically.`,
+  const list = (arr: string[]) =>
+    arr.length <= 1 ? arr[0] : `${arr.slice(0, -1).join(', ')} and ${arr[arr.length - 1]}`;
+  const kinds: { kind: ChangeKind; opener?: string; build: (disp: string, one: boolean) => string }[] = [
+    { kind: 'darkening', opener: 'Most of these areas', build: (d, one) => `${d} ${one ? 'has' : 'have'} turned darker — possibly flooding, new structures, or shadows` },
+    { kind: 'brightening', opener: 'Elsewhere', build: (d, one) => `${d} ${one ? 'has' : 'have'} become brighter — possibly exposed soil, bare ground, or new construction` },
+    { kind: 'vegetation-loss', build: (d, one) => `${d} ${one ? 'has' : 'have'} lost vegetation (trees or fields cleared)` },
+    { kind: 'vegetation-gain', build: (d, one) => `${d} ${one ? 'has' : 'have'} gained new vegetation (regrowth)` },
+    { kind: 'mixed', build: (d, one) => `${d} ${one ? 'shows' : 'show'} a mix of different changes in the same spot` },
+  ];
+
+  const body: string[] = [];
+  kinds.forEach((k) => {
+    const locs = byLoc.get(k.kind);
+    if (!locs || locs.length === 0) return;
+    const one = locs.length === 1;
+    const disp = one
+      ? locs[0].replace(/^the /, '').replace(/^./, (ch) => ch.toUpperCase())
+      : list(locs);
+    const sentence = `${k.build(disp, one)}.`;
+    body.push(k.opener ? `${k.opener}: ${sentence}` : sentence);
+  });
+  if (body.length > 0) parts.push(body.join(' '));
+
+  parts.push(
+    `All in all, the marked boxes include about ${(c.recall * 100).toFixed(0)}% of the visible changes, and roughly ${(c.precision * 100).toFixed(0)}% of what is marked is a real change (F1 ${c.f1.toFixed(2)}, IoU ${c.iou.toFixed(2)}). The sensitivity level (${ev.diffThreshold.toFixed(1)}) was chosen automatically.`,
   );
-  lines.push(`LIMITS: ${scaleNote}.`);
-  return lines.join('\n');
+  parts.push(`These are estimates and should be verified against newer imagery or ground observations (${scaleNote}).`);
+
+  return parts.join('\n\n');
 }
 
 export async function generateSketchedEvidence(
