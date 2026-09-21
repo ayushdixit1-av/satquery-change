@@ -10,7 +10,6 @@ import PromoBanner from './components/PromoBanner';
 import AnalysisModal from './components/AnalysisModal';
 import ChatView from './components/ChatView';
 import SettingsView from './components/SettingsView';
-import { SAMPLE_ANALYSES } from './data/mockData';
 import { DEFAULT_SETTINGS, type AnalysisItem, type AppView, type SatQuerySettings } from './types';
 
 const LEGACY_STORAGE_KEYS = ['satquery.analyses', 'satquery.settings'];
@@ -105,7 +104,7 @@ const App: React.FC = () => {
       return DEFAULT_SETTINGS;
     }
   });
-  const [analyses, setAnalyses] = useState<AnalysisItem[]>(SAMPLE_ANALYSES);
+  const [analyses, setAnalyses] = useState<AnalysisItem[]>([]);
 
   useEffect(() => {
     try {
