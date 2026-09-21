@@ -98,36 +98,6 @@ const HeroSection: React.FC<HeroSectionProps> = ({ onStart }) => {
           <div className="earth-glow relative rounded-full">
             <SatQueryLogo className="h-64 w-64 sm:h-80 sm:w-80" />
           </div>
-
-          {/* Floating telemetry chips */}
-          <motion.div
-            className="glass-panel absolute -left-2 top-6 rounded-2xl px-3 py-2 sm:left-0"
-            animate={{ y: [0, -8, 0] }}
-            transition={{ duration: 4.5, repeat: Infinity, ease: 'easeInOut', delay: 0.4 }}
-          >
-            <p className="text-[10px] font-bold uppercase tracking-wider text-slate-500">Sensor</p>
-            <p className="text-xs font-extrabold text-slate-900">Sentinel-2 MSI</p>
-            <p className="text-[10px] font-semibold text-sky-600">13 bands · 10 m</p>
-          </motion.div>
-
-          <motion.div
-            className="glass-panel absolute right-0 top-1/3 rounded-2xl px-3 py-2"
-            animate={{ y: [0, 8, 0] }}
-            transition={{ duration: 5, repeat: Infinity, ease: 'easeInOut', delay: 1 }}
-          >
-            <p className="text-[10px] font-bold uppercase tracking-wider text-slate-500">Change metric</p>
-            <p className="text-base font-extrabold text-emerald-600">Δ 12.4%</p>
-            <p className="text-[10px] font-semibold text-slate-500">IoU 88.1</p>
-          </motion.div>
-
-          <motion.div
-            className="glass-panel absolute bottom-4 left-6 rounded-2xl px-3 py-2"
-            animate={{ y: [0, -10, 0] }}
-            transition={{ duration: 5.5, repeat: Infinity, ease: 'easeInOut', delay: 0.7 }}
-          >
-            <p className="text-[10px] font-bold uppercase tracking-wider text-slate-500">Mode</p>
-            <p className="text-xs font-extrabold text-indigo-600">Bi-temporal · T1→T2</p>
-          </motion.div>
         </motion.div>
       </div>
     </section>
