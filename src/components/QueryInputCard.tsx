@@ -1,5 +1,5 @@
 import React, { useRef, useState } from 'react';
-import { ImagePlus, Send, Sparkles, MapPin, FileImage } from 'lucide-react';
+import { ImagePlus, Send, Sparkles, FileImage } from 'lucide-react';
 import { CAPABILITY_TAGS } from '../data/mockData';
 
 export interface QueryInputCardProps {
@@ -127,14 +127,6 @@ const QueryInputCard: React.FC<QueryInputCardProps> = ({ onQuery, onAttachImages
                 <ImagePlus className="h-4 w-4" />
                 Attach T1 / T2 images
               </button>
-              <span className="flex items-center gap-1 text-[11px] font-semibold text-slate-500">
-                <FileImage className="h-3.5 w-3.5 text-sky-500" />
-                …or drag &amp; drop them here
-              </span>
-              <span className="flex items-center gap-1 text-[11px] font-semibold text-slate-500">
-                <MapPin className="h-3.5 w-3.5 text-amber-500" />
-                AOI bounds auto-located from your imagery
-              </span>
             </div>
 
             <button
