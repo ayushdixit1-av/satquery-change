@@ -67,18 +67,6 @@ const HeroSection: React.FC<HeroSectionProps> = ({ onStart }) => {
               <ArrowRight className="h-4 w-4 transition-transform group-hover:translate-x-0.5" />
             </button>
           </div>
-
-          <div className="mt-8 flex flex-wrap gap-x-6 gap-y-2 text-xs font-semibold text-slate-400">
-            <span className="flex items-center gap-1.5">
-              <span className="h-1.5 w-1.5 rounded-full bg-sky-400" /> 100% on-device inference
-            </span>
-            <span className="flex items-center gap-1.5">
-              <span className="h-1.5 w-1.5 rounded-full bg-emerald-400" /> Evidence contours on every answer
-            </span>
-            <span className="flex items-center gap-1.5">
-              <span className="h-1.5 w-1.5 rounded-full bg-indigo-400" /> Precision / Recall / IoU audited
-            </span>
-          </div>
         </div>
 
         {/* Visual */}
