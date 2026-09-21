@@ -74,7 +74,7 @@ const Sidebar: React.FC<SidebarProps> = ({
       <aside
         className={[
           'fixed inset-y-0 left-0 z-40 flex flex-col transition-all duration-300 ease-out',
-          'lg:static lg:translate-x-0 lg:transition-[width,padding]',
+          'lg:sticky lg:top-0 lg:self-start lg:translate-x-0 lg:transition-[width,padding]',
           collapsed ? 'lg:w-[84px]' : 'lg:w-[264px]',
           mobileOpen ? 'translate-x-0' : '-translate-x-full',
           'lg:translate-x-0',
@@ -82,7 +82,7 @@ const Sidebar: React.FC<SidebarProps> = ({
       >
         <div
           className={[
-            'glass-panel m-3 flex h-[calc(100%-24px)] flex-col overflow-hidden rounded-3xl',
+            'glass-panel m-3 flex max-h-[calc(100vh-24px)] flex-col overflow-hidden rounded-3xl',
             collapsed ? 'p-2.5' : 'p-4',
           ].join(' ')}
         >
