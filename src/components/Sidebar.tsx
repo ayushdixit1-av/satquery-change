@@ -50,23 +50,14 @@ const Sidebar: React.FC<SidebarProps> = ({
     items.findIndex((i) => i.id === activeId),
   );
 
-  const gooeyItems: GooeyNavItem[] = [
-    ...items.map((item, idx): GooeyNavItem => ({
-      id: item.id,
-      label: item.label,
-      icon: item.icon,
-      badge: item.badge,
-      hasDividerBefore: idx === 5,
-      onClick: isMobile ? onMobileClose : undefined,
-    })),
-    {
-      id: 'profile',
-      label: 'Profile',
-      isProfile: true,
-      user: USER,
-      onClick: isMobile ? onMobileClose : undefined,
-    },
-  ];
+  const gooeyItems: GooeyNavItem[] = items.map((item, idx): GooeyNavItem => ({
+    id: item.id,
+    label: item.label,
+    icon: item.icon,
+    badge: item.badge,
+    hasDividerBefore: idx === 5,
+    onClick: isMobile ? onMobileClose : undefined,
+  }));
 
   const activeNavId = activeId === 'profile' ? 'profile' : activeId;
 
@@ -160,6 +151,47 @@ const Sidebar: React.FC<SidebarProps> = ({
               />
             </div>
           </div>
+
+          {/* Profile pinned to the lower side */}
+          <button
+            type="button"
+            onClick={() => {
+              if (isMobile) onMobileClose();
+              onSelect('profile');
+            }}
+            className={[
+              'relative z-10 mt-3 flex w-full items-center rounded-2xl p-2.5 transition-all duration-150',
+              activeNavId === 'profile'
+                ? 'bg-slate-900 text-white shadow-lg shadow-slate-900/20 border border-slate-800'
+                : 'bg-white/60 hover:bg-white/90 text-slate-800 border border-slate-200/60 shadow-xs',
+              collapsed ? 'justify-center' : 'justify-between',
+            ].join(' ')}
+            aria-label={`Profile: ${USER.name}`}
+          >
+            <div className={['flex min-w-0 items-center', collapsed ? '' : 'gap-2.5']}>
+              <div
+                className={[
+                  'flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-xs font-bold tracking-wider shadow-xs',
+                  activeNavId === 'profile'
+                    ? 'bg-blue-600 text-white ring-2 ring-blue-400/50'
+                    : 'bg-slate-900 text-white',
+                ].join(' ')}
+              >
+                {USER.initials}
+              </div>
+              {!collapsed && (
+                <div className="min-w-0 text-left">
+                  <p className="truncate text-xs font-bold">{USER.name}</p>
+                  <p className="truncate text-[10px] text-slate-500">{USER.email}</p>
+                </div>
+              )}
+            </div>
+            {!collapsed && (
+              <span className={['shrink-0 text-xs font-semibold', activeNavId === 'profile' ? 'text-sky-300' : 'text-slate-400']}>
+                →
+              </span>
+            )}
+          </button>
 
           {!isMobile && (
             <p className={['mt-3 text-center text-[9px] font-medium tracking-widest text-slate-400 uppercase', collapsed ? 'hidden' : ''].join(' ')}>
