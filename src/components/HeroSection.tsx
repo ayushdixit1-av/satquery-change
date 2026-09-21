@@ -1,6 +1,6 @@
 import React from 'react';
 import { motion } from 'motion/react';
-import { ArrowRight, Play } from 'lucide-react';
+import { ArrowRight } from 'lucide-react';
 import { SatQueryLogo } from './SatQueryLogo';
 
 export interface HeroSectionProps {
@@ -65,14 +65,6 @@ const HeroSection: React.FC<HeroSectionProps> = ({ onStart }) => {
             >
               Start an Analysis
               <ArrowRight className="h-4 w-4 transition-transform group-hover:translate-x-0.5" />
-            </button>
-            <button
-              type="button"
-              onClick={onStart}
-              className="glass-pill flex items-center gap-2 rounded-2xl px-5 py-3 text-sm font-bold text-slate-800 transition-all hover:-translate-y-0.5 hover:bg-white"
-            >
-              <Play className="h-4 w-4 text-sky-600" />
-              Explore Live Demo
             </button>
           </div>
 
