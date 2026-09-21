@@ -134,8 +134,8 @@ const Sidebar: React.FC<SidebarProps> = ({
           <div className="sq-hairline my-3 border-t" />
 
           {/* Gooey navigation */}
-          <div className={['flex-1 overflow-y-auto sq-scroll-slim', collapsed ? 'sq-rail' : ''].join(' ')}>
-            <div className="h-full">
+          <div className={['max-h-full overflow-y-auto sq-scroll-slim', collapsed ? 'sq-rail' : ''].join(' ')}>
+            <div className="min-w-0">
               <GooeyNav
                 items={gooeyItems}
                 activeIndex={items.findIndex((i) => i.id === activeNavId) >= 0 ? items.findIndex((i) => i.id === activeNavId) : activeIdx}
@@ -194,7 +194,7 @@ const Sidebar: React.FC<SidebarProps> = ({
           </button>
 
           {!isMobile && (
-            <p className={['mt-3 text-center text-[9px] font-medium tracking-widest text-slate-400 uppercase', collapsed ? 'hidden' : ''].join(' ')}>
+            <p className={['mt-auto pt-3 text-center text-[9px] font-medium tracking-widest text-slate-400 uppercase', collapsed ? 'hidden' : ''].join(' ')}>
               v2.1 · On-device engine
             </p>
           )}
