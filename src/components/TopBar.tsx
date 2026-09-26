@@ -35,8 +35,8 @@ const TopBar: React.FC<TopBarProps> = ({ onOpenMenu, onQuerySubmit, onNewChat, o
   };
 
   return (
-    <header className="sticky top-0 z-20 px-4 pt-3 lg:px-6">
-      <div className="glass-panel flex items-center gap-3 rounded-2xl px-4 py-2.5">
+    <header className="sticky top-0 z-20 px-4 pt-2 lg:px-6 lg:pt-2.5">
+      <div className="glass-panel flex items-center gap-3 rounded-2xl px-4 py-2">
         {/* Mobile menu + brand */}
         <button
           type="button"

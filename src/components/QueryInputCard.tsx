@@ -53,7 +53,7 @@ const QueryInputCard: React.FC<QueryInputCardProps> = ({ onQuery, onAttachImages
   };
 
   return (
-    <section className="px-4 pt-10 lg:px-6">
+    <section className="px-4 pt-6 lg:px-6 lg:pt-[clamp(0.5rem,1.6vh,1.25rem)]">
       <div
         onDragEnter={handleDragEnter}
         onDragOver={(e) => {
@@ -62,7 +62,7 @@ const QueryInputCard: React.FC<QueryInputCardProps> = ({ onQuery, onAttachImages
         onDragLeave={handleDragLeave}
         onDrop={handleDrop}
         className={[
-          'glass-panel relative overflow-hidden rounded-3xl p-5 ring-2 transition-all sm:p-6',
+          'glass-panel relative overflow-hidden rounded-3xl p-4 ring-2 transition-all sm:p-5 lg:p-4',
           dragging ? 'ring-sky-400/60' : 'ring-transparent',
         ].join(' ')}
       >
@@ -101,28 +101,28 @@ const QueryInputCard: React.FC<QueryInputCardProps> = ({ onQuery, onAttachImages
             }}
             rows={2}
             placeholder='e.g. "Measure the urban sprawl between my two satellite images…"'
-            className="glass-input mt-3 w-full resize-none rounded-2xl px-4 py-3 text-sm font-medium text-slate-800 placeholder:text-slate-400 outline-none"
+            className="glass-input mt-2.5 w-full resize-none rounded-2xl px-4 py-2.5 text-sm font-medium text-slate-800 placeholder:text-slate-400 outline-none"
           />
 
-          <div className="mt-3 flex flex-wrap gap-2">
+          <div className="mt-2.5 flex flex-wrap gap-2">
             {CAPABILITY_TAGS.map((tag) => (
               <button
                 key={tag}
                 type="button"
                 onClick={() => submit(tag)}
-                className="glass-pill rounded-full px-3 py-1.5 text-[11px] font-bold text-slate-700 transition-all hover:-translate-y-0.5 hover:bg-white"
+                className="glass-pill rounded-full px-2.5 py-1 text-[11px] font-bold text-slate-700 transition-all hover:-translate-y-0.5 hover:bg-white"
               >
                 {tag}
               </button>
             ))}
           </div>
 
-          <div className="mt-4 flex flex-wrap items-center justify-between gap-3">
+          <div className="mt-3 flex flex-wrap items-center justify-between gap-3">
             <div className="flex flex-wrap items-center gap-2">
               <button
                 type="button"
                 onClick={onAttachImages}
-                className="flex items-center gap-2 rounded-xl bg-indigo-500/10 px-3.5 py-2 text-xs font-bold text-indigo-700 transition-colors hover:bg-indigo-500/20"
+                className="flex items-center gap-2 rounded-xl bg-indigo-500/10 px-3 py-1.5 text-xs font-bold text-indigo-700 transition-colors hover:bg-indigo-500/20"
               >
                 <ImagePlus className="h-4 w-4" />
                 Attach T1 / T2 images
@@ -133,7 +133,7 @@ const QueryInputCard: React.FC<QueryInputCardProps> = ({ onQuery, onAttachImages
               type="button"
               onClick={() => submit()}
               disabled={!value.trim()}
-              className="flex items-center gap-2 rounded-xl bg-sky-500 px-4 py-2 text-xs font-bold text-white shadow-md shadow-sky-500/30 transition-all hover:bg-sky-400 disabled:cursor-not-allowed disabled:opacity-40"
+              className="flex items-center gap-2 rounded-xl bg-sky-500 px-4 py-1.5 text-xs font-bold text-white shadow-md shadow-sky-500/30 transition-all hover:bg-sky-400 disabled:cursor-not-allowed disabled:opacity-40"
             >
               <Send className="h-3.5 w-3.5" />
               Analyze

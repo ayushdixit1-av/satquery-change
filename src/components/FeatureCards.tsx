@@ -66,17 +66,17 @@ const CARDS: FeatureCard[] = [
 ];
 
 const FeatureCards: React.FC<FeatureCardsProps> = ({ onAction }) => (
-  <section className="px-4 pt-10 lg:px-6">
-    <div className="mb-4 flex items-end justify-between">
+  <section className="px-4 pt-6 lg:px-6 lg:pt-[clamp(0.5rem,1.6vh,1.25rem)]">
+    <div className="mb-2.5 flex items-end justify-between lg:mb-3">
       <div>
         <p className="text-[11px] font-bold uppercase tracking-[0.16em] text-sky-400">Capabilities</p>
-        <h3 className="mt-1 text-xl font-extrabold tracking-tight text-slate-100">
+        <h3 className="mt-0.5 text-lg font-extrabold tracking-tight text-slate-100 lg:text-[clamp(1rem,2vh,1.25rem)]">
           Five ways to interrogate the surface of the Earth
         </h3>
       </div>
     </div>
 
-    <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5">
+    <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5">
       {CARDS.map((card) => {
         const Icon = card.icon;
         return (
@@ -84,16 +84,16 @@ const FeatureCards: React.FC<FeatureCardsProps> = ({ onAction }) => (
             key={card.title}
             type="button"
             onClick={() => onAction(card.action)}
-            className="group glass-panel flex flex-col rounded-3xl p-5 text-left transition-all duration-300 ring-2 ring-transparent hover:-translate-y-1 hover:shadow-xl"
+            className="group glass-panel flex flex-col rounded-3xl p-4 text-left transition-all duration-300 ring-2 ring-transparent hover:-translate-y-1 hover:shadow-xl lg:p-3.5"
           >
-            <div className={`flex h-11 w-11 items-center justify-center rounded-2xl ${card.tint}`}>
-              <Icon className="h-5 w-5" />
+            <div className={`flex h-9 w-9 items-center justify-center rounded-xl ${card.tint}`}>
+              <Icon className="h-4 w-4" />
             </div>
-            <div className="mt-4 flex items-center justify-between gap-2">
+            <div className="mt-3 flex items-center justify-between gap-2">
               <h4 className="text-sm font-extrabold tracking-tight text-slate-900">{card.title}</h4>
               <ArrowUpRight className="h-4 w-4 shrink-0 text-slate-400 transition-all group-hover:translate-x-0.5 group-hover:-translate-y-0.5 group-hover:text-sky-500" />
             </div>
-            <p className="mt-2 text-xs font-medium leading-relaxed text-slate-600">{card.desc}</p>
+            <p className="mt-1.5 text-xs font-medium leading-snug text-slate-600 lg:line-clamp-3">{card.desc}</p>
           </button>
         );
       })}
