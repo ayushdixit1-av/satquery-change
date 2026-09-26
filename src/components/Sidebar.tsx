@@ -74,7 +74,7 @@ const Sidebar: React.FC<SidebarProps> = ({
       <aside
         className={[
           'fixed inset-y-0 left-0 z-40 flex flex-col transition-all duration-300 ease-out',
-          'lg:sticky lg:top-0 lg:self-start lg:translate-x-0 lg:transition-[width,padding]',
+          'lg:sticky lg:top-0 lg:self-start lg:h-dvh lg:translate-x-0 lg:transition-[width,padding]',
           collapsed ? 'lg:w-[84px]' : 'lg:w-[264px]',
           mobileOpen ? 'translate-x-0' : '-translate-x-full',
           'lg:translate-x-0',
@@ -82,7 +82,7 @@ const Sidebar: React.FC<SidebarProps> = ({
       >
         <div
           className={[
-            'glass-panel m-3 flex max-h-[calc(100vh-24px)] flex-col overflow-hidden rounded-3xl',
+            'glass-panel m-3 flex min-h-0 flex-1 flex-col overflow-hidden rounded-3xl',
             collapsed ? 'p-2.5' : 'p-4',
           ].join(' ')}
         >
@@ -134,7 +134,7 @@ const Sidebar: React.FC<SidebarProps> = ({
           <div className="sq-hairline my-3 border-t" />
 
           {/* Gooey navigation */}
-          <div className={['max-h-full overflow-y-auto sq-scroll-slim', collapsed ? 'sq-rail' : ''].join(' ')}>
+          <div className={['min-h-0 flex-1 overflow-y-auto sq-scroll-slim', collapsed ? 'sq-rail' : ''].join(' ')}>
             <div className="min-w-0">
               <GooeyNav
                 items={gooeyItems}
